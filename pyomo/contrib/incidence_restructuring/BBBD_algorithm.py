@@ -1,6 +1,4 @@
 import copy
-# this is an edit
-# this is another edit
 # required classes
 # create data structures for blocks and for border vertices
 class Block(object):
