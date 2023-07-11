@@ -1,4 +1,4 @@
-from pyomo.contrib.incidence_reordering.BBBD_algorithm import Block
+from pyomo.contrib.incidence_restructuring.BBBD_algorithm import Block
 
 # @pytest.mark.parametrize(
 #         "p1, p2, expected_distance",

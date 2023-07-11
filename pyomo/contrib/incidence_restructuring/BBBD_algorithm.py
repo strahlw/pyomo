@@ -464,6 +464,7 @@ def bbbd_algo(x_adjacency, x_size, d_max, n_max, print_debug=False):
       print()
       print()
 
+  border_indices = [border_vertex_structures[i].label for i in border_vertex_structures if not border_vertex_added[i]]
   # get the order of the rows and columns
   order_columns = []
   for i in all_blocks:
@@ -471,4 +472,4 @@ def bbbd_algo(x_adjacency, x_size, d_max, n_max, print_debug=False):
       order_columns.append(k)
   border_columns = [column for column in range(len(x_adjacency)) if column not in order_columns]
   final_columns = order_columns + border_columns
-  return final_columns, all_blocks
+  return final_columns, all_blocks, border_indices

@@ -56,6 +56,8 @@ def get_column_order_partitions(num_part, adjacency_list, edge_set, membership):
   for i in range(len(membership)):
     if vertex_included[i]:
       partitions[membership[i]].append(i)
+
+  border_indices = [i for i in range(len(vertex_included)) if not vertex_included[i]]
   
   order_columns = []
   for i in partitions:
@@ -63,7 +65,7 @@ def get_column_order_partitions(num_part, adjacency_list, edge_set, membership):
       order_columns.append(k)
   border_columns = [column for column in range(len(adjacency_list)) if column not in order_columns]
   final_columns = order_columns + border_columns
-  return final_columns, partitions
+  return final_columns, partitions, border_indices
 
 def graph_partitioning_algorithm(num_part, adjacency_list):
   edge_set = [[(i,j) for j in adjacency_list[i]] for i in range(len(adjacency_list))]
@@ -72,7 +74,7 @@ def graph_partitioning_algorithm(num_part, adjacency_list):
   n_cuts, membership = partition_graph(num_part, adjacency_list_pymetis)
   return get_column_order_partitions(num_part, adjacency_list, edge_set, membership)
 
-
+##################################################################################################
 def update_outside_edges(i,j,outside_edges, membership):
     assert str(j) not in outside_edges[str(i)]
     assert str(i) not in outside_edges[str(j)]
