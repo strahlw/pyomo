@@ -785,7 +785,7 @@ class testProblemTerminationCriteria(unittest.TestCase):
         self.bbbd_algo = BBBD_algo(edges, m, n, 0.5)
 
 
-        column_order, row_order = self.bbbd_algo.solve()
+        column_order, row_order, blocks = self.bbbd_algo.solve()
         # check initial state 
         assert_data_vertices(self.bbbd_algo.variables, data_vertex_iter_7_2, data_blocks_iter_7_2)  
         assert_data_constr(self.bbbd_algo.constraints, data_constr_iter_7_2)
@@ -801,7 +801,7 @@ class testProblemTerminationCriteria(unittest.TestCase):
         self.bbbd_algo = BBBD_algo(edges, m, n, 0.3)
 
 
-        column_order, row_order = self.bbbd_algo.solve()
+        column_order, row_order, blocks = self.bbbd_algo.solve()
         # check initial state 
         assert_data_vertices(self.bbbd_algo.variables, data_vertex_iter_6_2, data_blocks_iter_6_2)  
         assert_data_constr(self.bbbd_algo.constraints, data_constr_iter_6_2)
@@ -810,9 +810,11 @@ class testProblemTerminationCriteria(unittest.TestCase):
 
         expected_column_order = [7,6,0,4,2,5,3,1]
         expected_row_order = [6,5,1,2,4,0,3,7]
+        expected_blocks = [[[7,6,0],[6,5,1]], [[4,2,5],[2,4,0]]]
 
         assert expected_column_order == column_order 
         assert expected_row_order == row_order
+        assert expected_blocks == blocks
 
 
 def test_rectangular_row():
@@ -826,7 +828,7 @@ def test_rectangular_row():
     bbbd_algo = BBBD_algo(edges, m, n, 0.3)
 
 
-    column_order, row_order = bbbd_algo.solve()
+    column_order, row_order, blocks = bbbd_algo.solve()
 
     expected_column_order = [7,6,0,4,2,5,3,1]
     expected_row_order = [6,5,1,2,4,0,3,7,8]
@@ -845,7 +847,7 @@ def test_rectangular_col():
     bbbd_algo = BBBD_algo(edges, m, n, 0.3)
 
 
-    column_order, row_order = bbbd_algo.solve()
+    column_order, row_order, blocks = bbbd_algo.solve()
 
     expected_column_order = [7,6,0,4,2,5,3,8,1]
     expected_row_order = [6,5,1,2,4,0,3,7]

@@ -41,8 +41,6 @@ class GenericDataStructure(object):
     def size(self):
         return len(self.data)
     
-    
-
 class Vertex(object):
     def __init__(self, id):
         self.label = id
@@ -567,7 +565,7 @@ class BBBD_algo(object):
     def solve(self):
         while not self.termination_criteria():
             self.iteration()
-        return self.get_column_row_order()
+        return self.get_column_row_order_blocks()
 
     def termination_criteria(self):
         # a block created will be greater than some fraction of size
@@ -576,7 +574,11 @@ class BBBD_algo(object):
         # other termination criteria could be a limit on the border size
         # return self.border_size <= self.border_threshold
     
-    def get_column_row_order(self):
+    def get_blocks(self):
+        return [[[i for i in self.blocks[block].var],\
+                 [i for i in self.blocks[block].constr]] for block in self.blocks]
+    
+    def get_column_row_order_blocks(self):
         # get the reordering of the columns and rows
         column_order = []
         row_order = []
@@ -591,7 +593,8 @@ class BBBD_algo(object):
         row_order += border_constr
         column_order += self.border_vars_no_constr
 
-        return column_order, row_order
+
+        return column_order, row_order, self.get_blocks()
 
 
     
