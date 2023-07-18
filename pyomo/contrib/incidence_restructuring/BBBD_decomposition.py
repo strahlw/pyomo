@@ -114,7 +114,10 @@ class VarVertex(Vertex):
     
     def set_associated_constraint(self, constraint):
         self.associated_constraint = constraint
-        self.size_block_combined = self.size_block + self.constr_size[self.associated_constraint]
+        if self.single_constraint == None:
+            self.size_block_combined = self.size_block + self.constr_size[self.associated_constraint]
+        else:
+            self.size_block_combined = self.size_block + self.constr_size[self.single_constraint]
 
     def add_adj_constr(self, label, constr_size):
         if label not in self.adj_constr:
@@ -335,7 +338,7 @@ class SortingStructure(object):
     def create_current_order(self):
         self.current_order = [i for i in self.data[self.current_key]]
         
-    def select_vertex(self):
+    def select_variable(self):
         return self.current_order.pop(0)
 
     def get_border_variables(self):
@@ -380,6 +383,7 @@ class BBBD_algo(object):
         self.to_add_merged_block_to_var = set()    
         self.to_add_merged_block_to_constr = set()
         self.blocks_to_remove = set()
+        self.border_vars_no_constr = []
 
         # for termination
         self.border_size = n
@@ -394,20 +398,17 @@ class BBBD_algo(object):
         self.block_label = 0
 
     def select_variable(self):
-        self.selected_variable = self.sorting_structure.select_vertex()
+        self.selected_variable = self.sorting_structure.select_variable()
+        # if a variable has no associated constraints available send to the border
+        while self.variables[self.selected_variable].adj_constr.size() == 0:
+            self.border_vars_no_constr.append(self.selected_variable)
+            self.selected_variable = self.sorting_structure.select_variable()
 
     def get_constraint_lowest_val(self):
         if self.variables[self.selected_variable].single_constraint != None:
             self.selected_constraint = self.variables[self.selected_variable].single_constraint
             return
         self.selected_constraint = self.variables[self.selected_variable].associated_constraint
-
-        # max = len(self.variables) + 1
-        # self.selected_constraint = len(self.variables) + 1
-        # for constr in self.variables[self.selected_variable].adj_constr:
-        #     if self.constraints[constr].size_variables < max:
-        #         max = self.constraints[constr].size_variables
-        #         self.selected_constraint = constr
 
     def remove_references(self):
         # remove them from adjacency list so that they are not updated
@@ -542,25 +543,6 @@ class BBBD_algo(object):
                 self.blocks[self.block_label-1].add_adj_constr(adj_constr)
                 self.constraints[adj_constr].remove_adj_block(block, self.blocks[block].size)
 
-    def iteration_prescribed(self, selected_var, selected_constraint):
-        # for testing purposes
-        self.select_variable()
-        self.get_constraint_lowest_val()
-        self.selected_variable = selected_var
-        self.selected_constraint = selected_constraint
-        self.create_block() # increases the block label by 1
-        self.remove_references()
-        self.vars_constr_to_update()
-        self.adjust_vars_sorting_structure()
-        self.update_block()
-        self.merge_blocks()
-        self.update_var_vertices()
-        self.update_constr_vertices()
-        self.update_var_sorting_structure()
-        self.update_sorting_structure()
-        self.remove_merged_blocks()
-        self.border_size -= 1
-
     def iteration(self):
         self.select_variable()
         self.get_constraint_lowest_val()
@@ -607,6 +589,7 @@ class BBBD_algo(object):
         
         column_order += border_vars 
         row_order += border_constr
+        column_order += self.border_vars_no_constr
 
         return column_order, row_order
 

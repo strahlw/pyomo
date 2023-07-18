@@ -719,56 +719,56 @@ class testProblemIteration2(unittest.TestCase):
         self.bbbd_algo = BBBD_algo(edges, m, n, 0.9)
 
 
-        self.bbbd_algo.iteration_prescribed(6,5)
+        self.bbbd_algo.iteration()
         # check initial state 
         assert_data_vertices(self.bbbd_algo.variables, data_vertex_iter_1, data_blocks_iter_1)  
         assert_data_constr(self.bbbd_algo.constraints, data_constr_iter_1)
         assert_data_sorting(self.bbbd_algo.sorting_structure, data_ss_iter_1)
         assert_data_blocks(self.bbbd_algo.blocks, data_blocks_iter_1)
 
-        self.bbbd_algo.iteration_prescribed(2,4)
+        self.bbbd_algo.iteration()
         assert_data_vertices(self.bbbd_algo.variables, data_vertex_iter_2, data_blocks_iter_2)  
         assert_data_constr(self.bbbd_algo.constraints, data_constr_iter_2)
         assert_data_sorting(self.bbbd_algo.sorting_structure, data_ss_iter_2)
         assert_data_blocks(self.bbbd_algo.blocks, data_blocks_iter_2)
 
         # iteration 3
-        self.bbbd_algo.iteration_prescribed(5,0)
+        self.bbbd_algo.iteration()
         assert_data_vertices(self.bbbd_algo.variables, data_vertex_iter_3, data_blocks_iter_3)  
         assert_data_constr(self.bbbd_algo.constraints, data_constr_iter_3)
         assert_data_sorting(self.bbbd_algo.sorting_structure, data_ss_iter_3)
         assert_data_blocks(self.bbbd_algo.blocks, data_blocks_iter_3)
 
         # iteration 4
-        self.bbbd_algo.iteration_prescribed(0,1)
+        self.bbbd_algo.iteration()
         assert_data_vertices(self.bbbd_algo.variables, data_vertex_iter_4, data_blocks_iter_4)  
         assert_data_constr(self.bbbd_algo.constraints, data_constr_iter_4)
         assert_data_sorting(self.bbbd_algo.sorting_structure, data_ss_iter_4)
         assert_data_blocks(self.bbbd_algo.blocks, data_blocks_iter_4)
 
         # iteration 5
-        self.bbbd_algo.iteration_prescribed(7,6)
+        self.bbbd_algo.iteration()
         assert_data_vertices(self.bbbd_algo.variables, data_vertex_iter_5, data_blocks_iter_5)  
         assert_data_constr(self.bbbd_algo.constraints, data_constr_iter_5)
         assert_data_sorting(self.bbbd_algo.sorting_structure, data_ss_iter_5)
         assert_data_blocks(self.bbbd_algo.blocks, data_blocks_iter_5)
 
         # iteration 6
-        self.bbbd_algo.iteration_prescribed(4,2)
+        self.bbbd_algo.iteration()
         assert_data_vertices(self.bbbd_algo.variables, data_vertex_iter_6, data_blocks_iter_6)  
         assert_data_constr(self.bbbd_algo.constraints, data_constr_iter_6)
         assert_data_sorting(self.bbbd_algo.sorting_structure, data_ss_iter_6)
         assert_data_blocks(self.bbbd_algo.blocks, data_blocks_iter_6)
 
         # iteration 7
-        self.bbbd_algo.iteration_prescribed(3,3)
+        self.bbbd_algo.iteration()
         assert_data_vertices(self.bbbd_algo.variables, data_vertex_iter_7, data_blocks_iter_7)  
         assert_data_constr(self.bbbd_algo.constraints, data_constr_iter_7)
         assert_data_sorting(self.bbbd_algo.sorting_structure, data_ss_iter_7)
         assert_data_blocks(self.bbbd_algo.blocks, data_blocks_iter_7)
 
         # iteration 8
-        self.bbbd_algo.iteration_prescribed(1,7)
+        self.bbbd_algo.iteration()
         assert self.bbbd_algo.sorting_structure.terminate
         assert_data_vertices(self.bbbd_algo.variables, data_vertex_iter_8, data_blocks_iter_8)  
         assert_data_constr(self.bbbd_algo.constraints, data_constr_iter_8)
