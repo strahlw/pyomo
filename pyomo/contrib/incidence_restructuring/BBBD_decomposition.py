@@ -324,7 +324,7 @@ class SortingStructure(object):
         # run algorithm to exhaustion - all the variables are in the block system
         if self.current_key == self.n:
             self.terminate = True
-            return
+            return True
         while self.current_key not in self.data or self.data[self.current_key].size() == 0:
             self.current_key += 1
         if self.current_key == self.previous_key:
@@ -385,6 +385,8 @@ class BBBD_algo(object):
 
         # for termination
         self.border_size = n
+        self.num_border_vars = 0
+        self.num_sys_vars = 0
 
         # for border constraints
         self.constraint_in_system = [False]*m
@@ -399,6 +401,7 @@ class BBBD_algo(object):
         self.selected_variable = self.sorting_structure.select_variable()
         # if a variable has no associated constraints available send to the border
         while self.variables[self.selected_variable].adj_constr.size() == 0:
+            self.num_border_vars += 1
             self.border_vars_no_constr.append(self.selected_variable)
             self.selected_variable = self.sorting_structure.select_variable()
 
@@ -544,7 +547,9 @@ class BBBD_algo(object):
     def iteration(self):
         self.select_variable()
         self.get_constraint_lowest_val()
-        self.create_block() # increases the block label by 1
+        self.create_block()
+        self.num_sys_vars += 1
+        # increases the block label by 1
         self.remove_references()
         self.vars_constr_to_update()
         self.adjust_vars_sorting_structure()
@@ -553,8 +558,9 @@ class BBBD_algo(object):
         self.update_var_vertices()
         self.update_constr_vertices()
         self.update_var_sorting_structure()
-        self.update_sorting_structure()
         self.remove_merged_blocks()
+        if self.num_sys_vars + self.num_border_vars != self.n:
+            self.update_sorting_structure()
         self.border_size -= 1
   
     def set_associated_constraint_var(self, var_index):
@@ -564,10 +570,13 @@ class BBBD_algo(object):
 
     def solve(self):
         while not self.termination_criteria():
-            self.iteration()
+            self.iteration()                
         return self.get_column_row_order_blocks()
 
     def termination_criteria(self):
+        if self.border_size == 0:
+            # terminate if border goes to 0
+            return True
         # a block created will be greater than some fraction of size
         # of the original matrix
         return self.sorting_structure.current_key > self.fraction*self.n
@@ -600,5 +609,13 @@ class BBBD_algo(object):
     
 
 
+# edges = [(0,1),(0,3), (1,0), (1,2), (2,2), (3,1)]
+# m = 4
+# n = 4
 
+# bbbd_algo = BBBD_algo(edges, m, n, 0.5)
+# bbbd_algo.iteration()
+# bbbd_algo.iteration()
+# bbbd_algo.iteration()
+# bbbd_algo.iteration()
 

@@ -414,7 +414,7 @@ data_constr_iter_8 = [[[],[],[2],[],[],[],[3],[4,6]], \
                      [[1,3], [], [3], [], [4], [1,7], [], []],\
                      [2,0,1,0,1,2,0,0]]
 data_blocks_iter_8 = [[7, [1,7,6,0,3,4,2,5], [7,6,5,1,3,2,4,0], 8, [], []]]
-data_ss_iter_8 = [{1: [], 2: [], 4:[], 6:[], 7:[], 8:[]}, 8, 8, []]
+data_ss_iter_8 = [{1: [], 2: [], 4:[], 6:[], 7:[], 8:[1]}, 8, 8, []]
 
 
 #### DATA FOR TEST 2 - selection criteria refinement
@@ -548,7 +548,7 @@ data_constr_iter_8_2 = [[[],[],[2],[],[],[],[3],[4,6]], \
                      [[1,3], [], [3], [], [4], [1,7], [], []],\
                      [2,0,1,0,1,2,0,0]]
 data_blocks_iter_8_2 = [[7, [1,7,6,0,3,4,2,5], [7,6,5,1,3,2,4,0], 8, [], []]]
-data_ss_iter_8_2 = [{1: [], 2: [], 4:[], 6:[], 7:[], 8:[]}, 8, 8, []]
+data_ss_iter_8_2 = [{1: [], 2: [], 4:[], 6:[], 7:[], 8:[1]}, 8, 8, []]
 
 
 
@@ -769,7 +769,7 @@ class testProblemIteration2(unittest.TestCase):
 
         # iteration 8
         self.bbbd_algo.iteration()
-        assert self.bbbd_algo.sorting_structure.terminate
+        # assert self.bbbd_algo.sorting_structure.terminate
         assert_data_vertices(self.bbbd_algo.variables, data_vertex_iter_8, data_blocks_iter_8)  
         assert_data_constr(self.bbbd_algo.constraints, data_constr_iter_8)
         assert_data_sorting(self.bbbd_algo.sorting_structure, data_ss_iter_8)
@@ -854,3 +854,104 @@ def test_rectangular_col():
 
     assert expected_column_order == column_order 
     assert expected_row_order == row_order
+
+
+data2_vertex_iter_0 = [[[],[],[],[]], \
+                    [[1],[0,3],[1,2],[0]],\
+                    [{1:0},{0:0,3:0}, {1:0, 2:0}, {0:0}],\
+                    [1,1,1,1],\
+                    [1,2,2,1],\
+                    [None, 3, 2, None]]
+data2_constr_iter_0 = [[[],[],[],[]], \
+                     [0,0,0,0], \
+                     [[1,3], [0,2], [2], [1]],\
+                     [2,2,1,1]]
+data2_blocks_iter_0 = []
+data2_ss_iter_0 = [{1: [0,3,1,2]}, 1, 1, [0,3,1,2]] 
+
+data2_vertex_iter_1 = [[[],[],[0],[]], \
+                    [[],[0,3],[2],[0]],\
+                    [{},{0:0,3:0}, {2:0}, {0:0}],\
+                    [1,1,2,1],\
+                    [0,2,1,1],\
+                    [None, 3, 2, None]]
+data2_constr_iter_1 = [[[],[],[],[]], \
+                     [0,0,0,0], \
+                     [[1,3], [2], [2], [1]],\
+                     [2,1,1,1]]
+data2_blocks_iter_1 = [[0, [0], [1], 1, [2], []]]
+data2_ss_iter_1 = [{1: [3,1], 2:[2]}, 1, 1, [3,1]] 
+
+data2_vertex_iter_2 = [[[],[1],[0],[]], \
+                    [[],[3],[2],[]],\
+                    [{},{3:0}, {2:0}, {}],\
+                    [1,2,2,1],\
+                    [0,1,1,0],\
+                    [None, 3, 2, None]]
+data2_constr_iter_2 = [[[],[],[],[]], \
+                     [0,0,0,0], \
+                     [[1], [2], [2], [1]],\
+                     [1,1,1,1]]
+data2_blocks_iter_2 = [[0, [0], [1], 1, [2], []], [1, [3], [0], 1, [1], []]]
+data2_ss_iter_2 = [{1: [], 2:[1,2]}, 2, 2, [2,1]] 
+
+data2_vertex_iter_3 = [[[],[1],[0],[]], \
+                    [[],[3],[],[]],\
+                    [{},{3:0}, {}, {}],\
+                    [1,2,2,1],\
+                    [0,1,0,0],\
+                    [None, 3, 2, None]]
+data2_constr_iter_3 = [[[],[],[],[]], \
+                     [0,0,0,0], \
+                     [[1], [2], [], [1]],\
+                     [1,1,0,1]]
+data2_blocks_iter_3 = [[1, [3], [0], 1, [1], []], [2, [0,2], [1,2], 2, [], []]]
+data2_ss_iter_3 = [{1: [], 2:[1]}, 2, 2, [1]] 
+
+data2_vertex_iter_4 = [[[],[1],[0],[]], \
+                    [[],[],[],[]],\
+                    [{},{}, {}, {}],\
+                    [1,2,2,1],\
+                    [0,1,0,0],\
+                    [None, 3, 2, None]]
+data2_constr_iter_4 = [[[],[],[],[]], \
+                     [0,0,0,0], \
+                     [[1], [2], [], []],\
+                     [1,1,0,0]]
+data2_blocks_iter_4 = [[2, [0,2], [1,2], 2, [], []], [3, [3,1], [0,3], 2, [], []]]
+data2_ss_iter_4 = [{1: [], 2:[]}, 2, 2, []] 
+
+
+
+class testProblemLoop(unittest.TestCase):
+    def test_algorithm(self):
+        edges = [(0,1),(0,3), (1,0), (1,2), (2,2), (3,1)]
+        m = 4
+        n = 4
+
+        self.bbbd_algo = BBBD_algo(edges, m, n, 0.5)
+
+        assert_data_vertices(self.bbbd_algo.variables, data2_vertex_iter_0, data2_blocks_iter_0)  
+        assert_data_constr(self.bbbd_algo.constraints, data2_constr_iter_0)
+        assert_data_sorting(self.bbbd_algo.sorting_structure, data2_ss_iter_0)
+        assert_data_blocks(self.bbbd_algo.blocks, data2_blocks_iter_0)
+
+        self.bbbd_algo.iteration()
+        assert_data_vertices(self.bbbd_algo.variables, data2_vertex_iter_1, data2_blocks_iter_1)  
+        assert_data_constr(self.bbbd_algo.constraints, data2_constr_iter_1)
+        assert_data_sorting(self.bbbd_algo.sorting_structure, data2_ss_iter_1)
+        assert_data_blocks(self.bbbd_algo.blocks, data2_blocks_iter_1)
+
+        self.bbbd_algo.iteration()
+        assert_data_vertices(self.bbbd_algo.variables, data2_vertex_iter_2, data2_blocks_iter_2)  
+        assert_data_constr(self.bbbd_algo.constraints, data2_constr_iter_2)
+        assert_data_sorting(self.bbbd_algo.sorting_structure, data2_ss_iter_2)
+        assert_data_blocks(self.bbbd_algo.blocks, data2_blocks_iter_2)
+
+        self.bbbd_algo.iteration()
+        assert_data_vertices(self.bbbd_algo.variables, data2_vertex_iter_3, data2_blocks_iter_3)  
+        assert_data_constr(self.bbbd_algo.constraints, data2_constr_iter_3)
+        assert_data_sorting(self.bbbd_algo.sorting_structure, data2_ss_iter_3)
+        assert_data_blocks(self.bbbd_algo.blocks, data2_blocks_iter_3)
+
+        self.bbbd_algo.iteration()
