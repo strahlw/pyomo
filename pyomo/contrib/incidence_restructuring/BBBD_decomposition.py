@@ -46,11 +46,18 @@ class Vertex(object):
         self.label = id
         self.adj_blocks = GenericDataStructure()
         self.size_block = 0
+        self.largest_adj_block = None
+        self.size_largest_block = 0
     
     def add_adj_block(self, label, size):
         if label not in self.adj_blocks:
             self.adj_blocks.add(label)
             self.size_block += size
+            if size >= self.size_largest_block:
+                # if merged, the resulting block will always be larger
+                # so it monotonically increases, and there will always be a label
+                self.largest_adj_block = label
+                self.size_largest_block = size
     
     def remove_adj_block(self, label, size):
         if label in self.adj_blocks:
@@ -110,12 +117,12 @@ class VarVertex(Vertex):
             return False 
         return True
     
-    def set_associated_constraint(self, constraint):
+    def set_associated_constraint(self, constraint, single_constraint_in_system):
         if constraint == None:
             self.size_block_combined = self.size_block
             return
         self.associated_constraint = constraint
-        if self.single_constraint == None:
+        if self.single_constraint == None or single_constraint_in_system:
             self.size_block_combined = self.size_block + self.constr_size[self.associated_constraint]
         else:
             self.size_block_combined = self.size_block + self.constr_size[self.single_constraint]
@@ -148,6 +155,7 @@ class VarVertex(Vertex):
         print("constraint size = ", self.constr_size)
         print("size combined = ", self.size_block_combined)
         print("single constraint = ", self.single_constraint)
+        print("largest adj_block = ", self.largest_adj_block)
 
 
 class ConstrVertex(Vertex):
@@ -402,6 +410,11 @@ class BBBD_algo(object):
         self.variables = [VarVertex(i) for i in range(n)]
         self.constraints = [ConstrVertex(j) for j in range(m)]
         self.sorting_structure = SortingStructure(self.n)
+        # for border constraints
+        self.constraint_in_system = [False]*m
+        self.variable_in_system = [False]*n
+
+
         for i in range(n):
             self.sorting_structure.add_data(1, i)
 
@@ -433,9 +446,6 @@ class BBBD_algo(object):
         self.num_sys_vars = 0
         self.terminate = False
 
-        # for border constraints
-        self.constraint_in_system = [False]*m
-        self.variable_in_system = [False]*n
 
         # for debugging
         self.iteration_counter = 0
@@ -450,7 +460,31 @@ class BBBD_algo(object):
         if self.print_data:
             print("Initial states")
             self.print_data_objects()
+    
+    def set_seed_block(self):
+        if self.variables[self.selected_variable].largest_adj_block == None:
+            size_var = -1
+        else:
+            size_var = self.blocks[self.variables[self.selected_variable].largest_adj_block].size
 
+        if self.constraints[self.selected_constraint].largest_adj_block == None:
+            size_constr = -1
+        else:
+            size_constr = self.blocks[self.constraints[self.selected_constraint].largest_adj_block].size
+        
+        if size_var == -1 and size_constr == -1:
+            self.seed_block = self.block_label
+            return
+
+        if size_var == size_constr:
+            self.seed_block = min(self.variables[self.selected_variable].largest_adj_block, 
+                                  self.constraints[self.selected_constraint].largest_adj_block)
+            return
+        if size_var > size_constr:
+            self.seed_block = self.variables[self.selected_variable].largest_adj_block
+        else:
+            self.seed_block = self.constraints[self.selected_constraint].largest_adj_block
+    
     def check_sorting_structure(self):
         if len(self.sorting_structure.current_order) == 0:
             self.sorting_structure.increment_current_key()
@@ -478,7 +512,7 @@ class BBBD_algo(object):
             self.selected_variable = self.sorting_structure.select_variable()
 
     def get_constraint_lowest_val(self):
-        if self.variables[self.selected_variable].single_constraint != None:
+        if self.variables[self.selected_variable].single_constraint != None and not self.constraint_in_system[self.variables[self.selected_variable].single_constraint]:
             self.selected_constraint = self.variables[self.selected_variable].single_constraint
             return
         self.selected_constraint = self.variables[self.selected_variable].associated_constraint
@@ -490,19 +524,18 @@ class BBBD_algo(object):
 
     def create_block(self):
         self.blocks[self.block_label] = Block(self.block_label)
-        self.blocks[self.block_label].add_var_constr(self.selected_variable, self.selected_constraint)
+        #self.blocks[self.block_label].add_var_constr(self.selected_variable, self.selected_constraint)
         self.block_label += 1
-        self.constraint_in_system[self.selected_constraint] = True
-        self.variable_in_system[self.selected_variable] = True
 
     def update_block(self):
         # don't add the variables and constraints that form the block
         for adj_constr in self.variables[self.selected_variable].adj_constr:
-            if adj_constr != self.selected_constraint:
-                self.blocks[self.block_label-1].add_adj_constr(adj_constr)
+            # may be redundant
+            if adj_constr != self.selected_constraint and adj_constr not in self.blocks[self.seed_block].constr:
+                self.blocks[self.seed_block].add_adj_constr(adj_constr)
         for adj_var in self.constraints[self.selected_constraint].adj_var:
-            if adj_var != self.selected_variable:
-                self.blocks[self.block_label-1].add_adj_var(adj_var)
+            if adj_var != self.selected_variable and adj_var not in self.blocks[self.seed_block].var:
+                self.blocks[self.seed_block].add_adj_var(adj_var)
     
     # def update_variable_sizes(self):
     #     for var in self.to_add_merged_block_to_var:
@@ -519,25 +552,29 @@ class BBBD_algo(object):
             self.sorting_structure.sorting_function(self.variables)
 
     # now assumes that the constraints have been updated first
+    # all variables have been added to the seed block
     def update_var_vertices(self):
         for var in self.to_add_merged_block_to_var:
             self.variables[var].remove_adj_constr(self.selected_constraint)
-            self.variables[var].add_adj_block(self.block_label-1, self.blocks[self.block_label-1].size)
+            self.variables[var].add_adj_block(self.seed_block, self.blocks[self.seed_block].size)
 
     def update_var_sorting_structure(self):
         for var in self.to_add_merged_block_to_var:
-            self.set_associated_constraint_var(var)
+            if var != self.selected_variable:
+                self.set_associated_constraint_var(var)
             self.sorting_structure.add_data(self.variables[var].size_block_combined, var)
 
+    # all variables have to be added to the seed block first
     def update_constr_vertices(self):
         for constr in self.to_add_merged_block_to_constr:
-            self.constraints[constr].remove_adj_var(self.selected_variable)
-            self.constraints[constr].add_adj_block(self.block_label-1, self.blocks[self.block_label-1].size)
-            for var in self.constraints[constr].adj_var:
-                self.variables[var].constr_size[constr] = self.constraints[constr].size_block
-                for adj_block in self.constraints[constr].adj_blocks:
-                    if adj_block in self.variables[var].adj_blocks:
-                        self.variables[var].constr_size[constr] -= self.blocks[adj_block].size
+            if constr != self.selected_constraint:
+                self.constraints[constr].remove_adj_var(self.selected_variable)
+                self.constraints[constr].add_adj_block(self.seed_block, self.blocks[self.seed_block].size)
+                for var in self.constraints[constr].adj_var:
+                    self.variables[var].constr_size[constr] = self.constraints[constr].size_block
+                    for adj_block in self.constraints[constr].adj_blocks:
+                        if adj_block in self.variables[var].adj_blocks:
+                            self.variables[var].constr_size[constr] -= self.blocks[adj_block].size
             if self.constraints[constr].adj_var.size() == 1:
                 self.variables[next(iter(self.constraints[constr].adj_var))].single_constraint = constr
 
@@ -565,8 +602,16 @@ class BBBD_algo(object):
         for var in self.constraints[self.selected_constraint].adj_var:
             self.to_add_merged_block_to_var.add(var)
         
+        # means that we aren't creating a block in this iteration
+        if self.seed_block != self.block_label:
+            for adj_var in self.blocks[self.seed_block].adj_var:
+                self.to_add_merged_block_to_var.add(adj_var)
+            for adj_constr in self.blocks[self.seed_block].adj_constr:
+                self.to_add_merged_block_to_constr.add(adj_constr)
+
         for key in self.variables[self.selected_variable].adj_blocks:
-            self.blocks_to_remove.add(key)
+            if key != self.seed_block:
+                self.blocks_to_remove.add(key)
             for adj_variable in self.blocks[key].adj_var:
                 if adj_variable != self.selected_variable:
                     self.to_add_merged_block_to_var.add(adj_variable)
@@ -574,7 +619,8 @@ class BBBD_algo(object):
                 if adj_constr != self.selected_constraint:
                     self.to_add_merged_block_to_constr.add(adj_constr)
         for key in self.constraints[self.selected_constraint].adj_blocks:
-            self.blocks_to_remove.add(key)
+            if key != self.seed_block:
+                self.blocks_to_remove.add(key)
             if key not in self.variables[self.selected_variable].adj_blocks:
                 for adj_constr in self.blocks[key].adj_constr:
                     if adj_constr != self.selected_constraint:
@@ -583,41 +629,70 @@ class BBBD_algo(object):
                     if adj_var != self.selected_variable:
                         self.to_add_merged_block_to_var.add(adj_var)
 
+    def add_variable_constr_to_block(self):
+        self.constraint_in_system[self.selected_constraint] = True
+        self.variable_in_system[self.selected_variable] = True
+        self.blocks[self.seed_block].add_var(self.selected_variable)
+        self.blocks[self.seed_block].add_constr(self.selected_constraint)
+        self.blocks[self.seed_block].remove_adj_var(self.selected_variable)
+        self.blocks[self.seed_block].remove_adj_constr(self.selected_constraint)
 
-    def merge_blocks(self):        
-        if self.variables[self.selected_variable].adj_blocks.size() == 0 and \
-            self.constraints[self.selected_constraint].adj_blocks.size() == 0:
+    def merge_blocks(self):
+        # variable and constraint added to system
+        if (self.variables[self.selected_variable].adj_blocks.size() == 0 and \
+            self.constraints[self.selected_constraint].adj_blocks.size() == 0) or \
+                self.seed_block == self.block_label:
+            # here is where we create a block
+            self.create_block()
+            self.add_variable_constr_to_block()
             return
-
-        # merge the blocks   
-        for key in self.variables[self.selected_variable].adj_blocks:
+       
+        
+        self.remove_adj_block_seed()
+        self.add_variable_constr_to_block()
+        # merge the blocks
+        for key in self.blocks_to_remove:   
             self.merge_block(key)
-        for key in self.constraints[self.selected_constraint].adj_blocks:
-            if key not in self.variables[self.selected_variable].adj_blocks:
-                self.merge_block(key)
+        # for key in self.variables[self.selected_variable].adj_blocks:
+        #     self.merge_block(key)
+        # for key in self.constraints[self.selected_constraint].adj_blocks:
+        #     if key not in self.variables[self.selected_variable].adj_blocks:
+        #         self.merge_block(key)
         
         # update data structures
         for var in self.to_add_merged_block_to_var:
-            self.variables[var].add_adj_block(self.block_label-1, self.blocks[self.block_label-1].size)
+            self.variables[var].add_adj_block(self.seed_block, self.blocks[self.seed_block].size)
         for constr in self.to_add_merged_block_to_constr:
-            self.constraints[constr].add_adj_block(self.block_label-1, self.blocks[self.block_label-1].size)
-
+            self.constraints[constr].add_adj_block(self.seed_block, self.blocks[self.seed_block].size)
     
     def merge_block(self, block):
         for variable in self.blocks[block].var:
             if variable != self.selected_variable:
-                self.blocks[self.block_label-1].add_var(variable)
+                self.blocks[self.seed_block].add_var(variable)
+                # if variable in self.blocks[self.seed_block].adj_var:
+                #     self.blocks[self.seed_block].remove_adj_var(variable)
         for constr in self.blocks[block].constr:
             if constr != self.selected_constraint:
-                self.blocks[self.block_label-1].add_constr(constr)
+                self.blocks[self.seed_block].add_constr(constr)
+                # if constr in self.blocks[self.seed_block].adj_constr:
+                #     self.blocks[self.seed_block].remove_adj_constr(constr)
         for adj_variable in self.blocks[block].adj_var:
-            if adj_variable != self.selected_variable:
-                self.blocks[self.block_label-1].add_adj_var(adj_variable)
+            if adj_variable != self.selected_variable and adj_variable not in self.blocks[self.seed_block].var:
+                self.blocks[self.seed_block].add_adj_var(adj_variable)
                 self.variables[adj_variable].remove_adj_block(block, self.blocks[block].size)
         for adj_constr in self.blocks[block].adj_constr:
-            if adj_constr != self.selected_constraint:
-                self.blocks[self.block_label-1].add_adj_constr(adj_constr)
+            if adj_constr != self.selected_constraint and adj_constr not in self.blocks[self.seed_block].constr:
+                self.blocks[self.seed_block].add_adj_constr(adj_constr)
                 self.constraints[adj_constr].remove_adj_block(block, self.blocks[block].size)
+    
+    def remove_adj_block_seed(self):
+        for adj_variable in self.blocks[self.seed_block].adj_var:
+            if adj_variable != self.selected_variable:
+                self.variables[adj_variable].remove_adj_block(self.seed_block, self.blocks[self.seed_block].size)
+        for adj_constr in self.blocks[self.seed_block].adj_constr:
+            if adj_constr != self.selected_constraint:
+                self.constraints[adj_constr].remove_adj_block(self.seed_block, self.blocks[self.seed_block].size)
+
 
     def print_data_objects(self):
         print("\nVariable data\n")
@@ -651,14 +726,15 @@ class BBBD_algo(object):
         self.get_constraint_lowest_val()
         if self.print_data:
             print("selected constraint = ", self.selected_constraint)
-        self.create_block()
+        #self.create_block()
         self.num_sys_vars += 1
         # increases the block label by 1
+        self.set_seed_block()
         self.remove_references()
         self.vars_constr_to_update()
         self.adjust_vars_sorting_structure()
-        self.update_block()
         self.merge_blocks()
+        self.update_block()
         self.update_var_vertices()
         self.update_constr_vertices()
         self.update_var_sorting_structure()
@@ -671,13 +747,17 @@ class BBBD_algo(object):
   
     def set_associated_constraint_var(self, var_index):
         if len(self.variables[var_index].constr_size.keys()) == 0:
-            self.variables[var_index].set_associated_constraint(None)
+            self.variables[var_index].set_associated_constraint(None, False)
             return
         # if len(self.variables[var_index].constr_size.keys()):
         #     raise ValueError ("{} has no associated constraints".format(var_index))
+        single_constraint_in_system = False 
+        if self.variables[var_index].single_constraint != None:
+            single_constraint_in_system = self.constraint_in_system[self.variables[var_index].single_constraint]
+
         self.variables[var_index].set_associated_constraint(sorted(list(self.variables[var_index].constr_size.keys()),
                 key=lambda id: (self.variables[var_index].constr_size[id], self.constraints[id].size_variables)
-            )[0])
+            )[0], single_constraint_in_system)
 
     def solve(self):
         while not self.termination_criteria():
@@ -720,66 +800,66 @@ class BBBD_algo(object):
         return column_order, row_order, self.get_blocks()
 
 
-import numpy as np 
-import scipy as sc
-import matplotlib.pyplot as plt
-import random
-import sys
+# import numpy as np 
+# import scipy as sc
+# import matplotlib.pyplot as plt
+# import random
+# import sys
 
 
-def create_matrix(seed):
-    random.seed(seed)
-    size_matrix = 10
-    size_matrix_m = size_matrix
-    size_matrix_n = size_matrix
-    fill_matrix = 50 # maximum possible fill per row before adding diagonal
-    original_matrix = np.zeros((size_matrix, size_matrix))
-    for i in range(size_matrix):
-        # for each row select a number of indices to make nonzero
-        num_non_zeros = random.randint(0,int((size_matrix-1)*fill_matrix/100))
-        indices_used = []
-        for j in range(num_non_zeros):
-            # for each non zero, randomly choose an index (and keep track)
-            if j == 0:
-                index_to_fill = random.randint(0, size_matrix-1)
-                original_matrix[i][index_to_fill] = 1
-                indices_used.append(index_to_fill)
-            else:
-                index_to_fill = random.randint(0, size_matrix-1)
-                while index_to_fill in indices_used:
-                    index_to_fill = random.randint(0, size_matrix-1)
-                original_matrix[i][index_to_fill] = 1
-                indices_used.append(index_to_fill)
-    return original_matrix
+# def create_matrix(seed):
+#     random.seed(seed)
+#     size_matrix = 800
+#     size_matrix_m = size_matrix
+#     size_matrix_n = size_matrix
+#     fill_matrix = 3 # maximum possible fill per row before adding diagonal
+#     original_matrix = np.zeros((size_matrix, size_matrix))
+#     for i in range(size_matrix):
+#         # for each row select a number of indices to make nonzero
+#         num_non_zeros = random.randint(0,int((size_matrix-1)*fill_matrix/100))
+#         indices_used = []
+#         for j in range(num_non_zeros):
+#             # for each non zero, randomly choose an index (and keep track)
+#             if j == 0:
+#                 index_to_fill = random.randint(0, size_matrix-1)
+#                 original_matrix[i][index_to_fill] = 1
+#                 indices_used.append(index_to_fill)
+#             else:
+#                 index_to_fill = random.randint(0, size_matrix-1)
+#                 while index_to_fill in indices_used:
+#                     index_to_fill = random.randint(0, size_matrix-1)
+#                 original_matrix[i][index_to_fill] = 1
+#                 indices_used.append(index_to_fill)
+#     return original_matrix
 
 
-def reorder_sparse_matrix(m, n, row_order, col_order, target_matrix):
-  target_matrix = sc.sparse.coo_matrix(target_matrix)
-  permutation_matrix = sc.sparse.eye(m).tocoo()
-  permutation_matrix.col = permutation_matrix.col[row_order]
-  permuted_matrix = permutation_matrix.dot(target_matrix)
-  permutation_matrix = sc.sparse.eye(n).tocoo()
-  permutation_matrix.row = permutation_matrix.row[col_order]
-  return permuted_matrix.dot(permutation_matrix)
+# def reorder_sparse_matrix(m, n, row_order, col_order, target_matrix):
+#   target_matrix = sc.sparse.coo_matrix(target_matrix)
+#   permutation_matrix = sc.sparse.eye(m).tocoo()
+#   permutation_matrix.col = permutation_matrix.col[row_order]
+#   permuted_matrix = permutation_matrix.dot(target_matrix)
+#   permutation_matrix = sc.sparse.eye(n).tocoo()
+#   permutation_matrix.row = permutation_matrix.row[col_order]
+#   return permuted_matrix.dot(permutation_matrix)
 
-def show_matrix_structure(matrix):
-  plt.spy(matrix)
-  plt.show()
+# def show_matrix_structure(matrix):
+#   plt.spy(matrix)
+#   plt.show()
 
-def matrix_to_edges(matrix):
-    edges = []
-    for i in range(len(matrix)):
-        for j in range(len(matrix[0])):
-            if matrix[i][j] == 1:
-                edges.append((i,j))
-    return edges 
+# def matrix_to_edges(matrix):
+#     edges = []
+#     for i in range(len(matrix)):
+#         for j in range(len(matrix[0])):
+#             if matrix[i][j] == 1:
+#                 edges.append((i,j))
+#     return edges 
 
-# original_matrix = np.array([[0,0],[0,0]])
-# print(original_matrix)
-# show_matrix_structure(original_matrix)
+# # original_matrix = np.array([[0,0],[0,0]])
+# # print(original_matrix)
+# # show_matrix_structure(original_matrix)
 
 
-# seeds = range(50)
+# seeds = range(1)
 # failed = []
 # for i in seeds:
 #     original_matrix = create_matrix(i)
@@ -791,16 +871,16 @@ def matrix_to_edges(matrix):
 #     except:
 #         failed.append(i)
 
-# failed = [37]
-# original_matrix = create_matrix(37)
-# print(original_matrix)
-# show_matrix_structure(original_matrix)
-# test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), 0.5)
-# col_order, row_order, blocks = test.solve()
-# reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
-#     len(col_order), row_order, col_order, original_matrix)
-# print(col_order, row_order, blocks)
-# show_matrix_structure(reordered_incidence_matrix)
+# # failed = [7]
+# # original_matrix = create_matrix(7)
+# # print(original_matrix)
+# # show_matrix_structure(original_matrix)
+# # test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), 0.5)
+# # col_order, row_order, blocks = test.solve()
+# # reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
+# #     len(col_order), row_order, col_order, original_matrix)
+# # print(col_order, row_order, blocks)
+# # show_matrix_structure(reordered_incidence_matrix)
 # print(failed)
 
 # edges = [(0,1),(0,3), (1,0), (1,2), (2,2), (3,1)]
