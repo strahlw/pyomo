@@ -111,6 +111,9 @@ class VarVertex(Vertex):
         return True
     
     def set_associated_constraint(self, constraint):
+        if constraint == None:
+            self.size_block_combined = self.size_block
+            return
         self.associated_constraint = constraint
         if self.single_constraint == None:
             self.size_block_combined = self.size_block + self.constr_size[self.associated_constraint]
@@ -135,6 +138,17 @@ class VarVertex(Vertex):
     
     def set_single_constraint(self, label):
         self.single_constraint = label
+
+    def print_data(self):
+        print("Label = ", self.label)
+        print("adj_constr = ", [i for i in self.adj_constr])
+        print("adj blocks = ", [i for i in self.adj_blocks])
+        print("size variables = ", self.size_constraints)
+        print("size block = ", self.size_block)
+        print("constraint size = ", self.constr_size)
+        print("size combined = ", self.size_block_combined)
+        print("single constraint = ", self.single_constraint)
+
 
 class ConstrVertex(Vertex):
     def __init__(self, id):
@@ -184,6 +198,13 @@ class ConstrVertex(Vertex):
         if label in self.adj_var:
             self.adj_var.remove(label)
             self.size_variables -= 1
+
+    def print_data(self):
+        print("Label = ", self.label)
+        print("adj_var = ", [i for i in self.adj_var])
+        print("adj blocks = ", [i for i in self.adj_blocks])
+        print("size variables = ", self.size_variables)
+        print("size block = ", self.size_block)
 
 class Block(object):
     def __init__(self, id):
@@ -255,6 +276,14 @@ class Block(object):
     def remove_adj_constr(self, label):
         if label in self.adj_constr:
             self.adj_constr.remove(label)
+    
+    def print_data(self):
+        print("Block label = ", self.label)
+        print("Variables = ", [i for i in self.var])
+        print("Constr = ", [i for i in self.constr])
+        print("Adj Var = ", [i for i in self.adj_var])
+        print("Adj constr = ", [i for i in self.adj_constr])
+        print("size = ", self.size)
 
 class SortingStructure(object):
     def __init__(self,n):
@@ -306,7 +335,8 @@ class SortingStructure(object):
         if key not in self.data:
             raise ValueError("The predicted size does not exist in data")
         if data not in self.data[key]:
-            raise ValueError("The variable does not exist in predicted size")
+            self.print_data()
+            raise ValueError("The variable {} does not exist in predicted size {}".format(data, key))
         del self.data[key][data]
     
     def remove_data_no_check(self, key, data):
@@ -322,13 +352,19 @@ class SortingStructure(object):
     
     def increment_current_key(self):
         # run algorithm to exhaustion - all the variables are in the block system
-        if self.current_key == self.n:
+        if self.current_key >= self.n:
             self.terminate = True
             return True
         while self.current_key not in self.data or self.data[self.current_key].size() == 0:
+            # print("loop 358")
+            if self.current_key >= self.n:
+                self.terminate = True
+                return True
             self.current_key += 1
+        # no update
         if self.current_key == self.previous_key:
             return True
+        # updates
         if self.current_key != self.previous_key:
             self.previous_key = self.current_key 
             return False
@@ -345,6 +381,14 @@ class SortingStructure(object):
             for value in self.data[key]:
                 border_vars.append(value)
         return border_vars
+
+    def print_data(self):
+        print("size order")
+        for key in self.data:
+            print("key = ", key, " data = ", self.data[key])
+        print("current order = ", self.current_order)
+        print("current key = ", self.current_key)
+        print("previous key = ", self.previous_key)
 
 class BBBD_algo(object):
     def create_initial_data_structures(self, edge_list, m, n, fraction):
@@ -387,22 +431,50 @@ class BBBD_algo(object):
         self.border_size = n
         self.num_border_vars = 0
         self.num_sys_vars = 0
+        self.terminate = False
 
         # for border constraints
         self.constraint_in_system = [False]*m
+        self.variable_in_system = [False]*n
+
+        # for debugging
+        self.iteration_counter = 0
+
+        self.print_data = False
     
     def __init__(self, edge_list, m, n, fraction):
         self.create_initial_data_structures(edge_list, m ,n, fraction)
         self.selected_variable = -1
         self.selected_constraint = -1
         self.block_label = 0
+        if self.print_data:
+            print("Initial states")
+            self.print_data_objects()
+
+    def check_sorting_structure(self):
+        if len(self.sorting_structure.current_order) == 0:
+            self.sorting_structure.increment_current_key()
+            if self.sorting_structure.terminate:
+                self.terminate = True
+                return
+            self.sorting_structure.create_current_order()
+            self.sorting_structure.sorting_function(self.variables)
 
     def select_variable(self):
         self.selected_variable = self.sorting_structure.select_variable()
         # if a variable has no associated constraints available send to the border
         while self.variables[self.selected_variable].adj_constr.size() == 0:
+            # print("loop 459")
+            if self.print_data:
+                print("moved to border ", self.selected_variable)
+            # print(self.selected_variable)
             self.num_border_vars += 1
             self.border_vars_no_constr.append(self.selected_variable)
+            self.sorting_structure.remove_data(self.sorting_structure.current_key, self.selected_variable)
+            self.check_sorting_structure()
+            if self.sorting_structure.terminate:
+                self.terminate = True
+                break
             self.selected_variable = self.sorting_structure.select_variable()
 
     def get_constraint_lowest_val(self):
@@ -421,6 +493,7 @@ class BBBD_algo(object):
         self.blocks[self.block_label].add_var_constr(self.selected_variable, self.selected_constraint)
         self.block_label += 1
         self.constraint_in_system[self.selected_constraint] = True
+        self.variable_in_system[self.selected_variable] = True
 
     def update_block(self):
         # don't add the variables and constraints that form the block
@@ -470,8 +543,9 @@ class BBBD_algo(object):
 
     def adjust_vars_sorting_structure(self):
         for var in self.to_add_merged_block_to_var:
-            # remove from data
-            self.sorting_structure.remove_data(self.variables[var].size_block_combined, var)
+            # remove from data if not already removed
+            if var not in self.border_vars_no_constr:
+                self.sorting_structure.remove_data(self.variables[var].size_block_combined, var)
             # remove from current_order
             if var in self.sorting_structure.current_order:
                 self.sorting_structure.remove_from_current_order(var)
@@ -511,7 +585,8 @@ class BBBD_algo(object):
 
 
     def merge_blocks(self):        
-        if self.variables[self.selected_variable].adj_blocks.size() == 0:
+        if self.variables[self.selected_variable].adj_blocks.size() == 0 and \
+            self.constraints[self.selected_constraint].adj_blocks.size() == 0:
             return
 
         # merge the blocks   
@@ -544,9 +619,38 @@ class BBBD_algo(object):
                 self.blocks[self.block_label-1].add_adj_constr(adj_constr)
                 self.constraints[adj_constr].remove_adj_block(block, self.blocks[block].size)
 
+    def print_data_objects(self):
+        print("\nVariable data\n")
+        for var in self.variables:
+            var.print_data()
+        print("\nConstraint Data\n")
+        for constr in self.constraints:
+            constr.print_data()
+        print("\nBlock Data\n")
+        for block in self.blocks:
+            self.blocks[block].print_data()
+        print("\nSorting structure data\n")
+        self.sorting_structure.print_data()
+
     def iteration(self):
+        if self.num_sys_vars + self.num_border_vars == self.n:
+            self.terminate = True 
+            return
+        self.iteration_counter += 1
+        if self.print_data:
+            print("Iteration {}".format(self.iteration_counter))
+        self.check_sorting_structure()
+        if self.terminate:
+            return 
         self.select_variable()
+        if self.terminate:
+            return
+        if self.print_data:
+            print("\n Variable and Constraint Selection\n")
+            print("selected variable = ", self.selected_variable)
         self.get_constraint_lowest_val()
+        if self.print_data:
+            print("selected constraint = ", self.selected_constraint)
         self.create_block()
         self.num_sys_vars += 1
         # increases the block label by 1
@@ -562,15 +666,25 @@ class BBBD_algo(object):
         if self.num_sys_vars + self.num_border_vars != self.n:
             self.update_sorting_structure()
         self.border_size -= 1
+        if self.print_data:
+            self.print_data_objects()
   
     def set_associated_constraint_var(self, var_index):
+        if len(self.variables[var_index].constr_size.keys()) == 0:
+            self.variables[var_index].set_associated_constraint(None)
+            return
+        # if len(self.variables[var_index].constr_size.keys()):
+        #     raise ValueError ("{} has no associated constraints".format(var_index))
         self.variables[var_index].set_associated_constraint(sorted(list(self.variables[var_index].constr_size.keys()),
                 key=lambda id: (self.variables[var_index].constr_size[id], self.constraints[id].size_variables)
             )[0])
 
     def solve(self):
         while not self.termination_criteria():
-            self.iteration()                
+            # print("loop 661")
+            self.iteration()
+            if self.terminate:
+                break                
         return self.get_column_row_order_blocks()
 
     def termination_criteria(self):
@@ -595,19 +709,99 @@ class BBBD_algo(object):
             column_order += [item for item in self.blocks[block].var]
             row_order += [item for item in self.blocks[block].constr]
         # get remaining border variables and columns
-        border_vars = self.sorting_structure.get_border_variables()
+        border_vars = [i for i in range(len(self.variable_in_system)) if not self.variable_in_system[i]]
         border_constr = [i for i in range(len(self.constraint_in_system)) if not self.constraint_in_system[i]]
         
         column_order += border_vars 
         row_order += border_constr
-        column_order += self.border_vars_no_constr
+        #column_order += self.border_vars_no_constr
 
 
         return column_order, row_order, self.get_blocks()
 
 
-    
+import numpy as np 
+import scipy as sc
+import matplotlib.pyplot as plt
+import random
+import sys
 
+
+def create_matrix(seed):
+    random.seed(seed)
+    size_matrix = 10
+    size_matrix_m = size_matrix
+    size_matrix_n = size_matrix
+    fill_matrix = 50 # maximum possible fill per row before adding diagonal
+    original_matrix = np.zeros((size_matrix, size_matrix))
+    for i in range(size_matrix):
+        # for each row select a number of indices to make nonzero
+        num_non_zeros = random.randint(0,int((size_matrix-1)*fill_matrix/100))
+        indices_used = []
+        for j in range(num_non_zeros):
+            # for each non zero, randomly choose an index (and keep track)
+            if j == 0:
+                index_to_fill = random.randint(0, size_matrix-1)
+                original_matrix[i][index_to_fill] = 1
+                indices_used.append(index_to_fill)
+            else:
+                index_to_fill = random.randint(0, size_matrix-1)
+                while index_to_fill in indices_used:
+                    index_to_fill = random.randint(0, size_matrix-1)
+                original_matrix[i][index_to_fill] = 1
+                indices_used.append(index_to_fill)
+    return original_matrix
+
+
+def reorder_sparse_matrix(m, n, row_order, col_order, target_matrix):
+  target_matrix = sc.sparse.coo_matrix(target_matrix)
+  permutation_matrix = sc.sparse.eye(m).tocoo()
+  permutation_matrix.col = permutation_matrix.col[row_order]
+  permuted_matrix = permutation_matrix.dot(target_matrix)
+  permutation_matrix = sc.sparse.eye(n).tocoo()
+  permutation_matrix.row = permutation_matrix.row[col_order]
+  return permuted_matrix.dot(permutation_matrix)
+
+def show_matrix_structure(matrix):
+  plt.spy(matrix)
+  plt.show()
+
+def matrix_to_edges(matrix):
+    edges = []
+    for i in range(len(matrix)):
+        for j in range(len(matrix[0])):
+            if matrix[i][j] == 1:
+                edges.append((i,j))
+    return edges 
+
+# original_matrix = np.array([[0,0],[0,0]])
+# print(original_matrix)
+# show_matrix_structure(original_matrix)
+
+
+# seeds = range(50)
+# failed = []
+# for i in seeds:
+#     original_matrix = create_matrix(i)
+#     test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), 0.5)
+#     try:
+#         col_order, row_order, blocks = test.solve()
+# # reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
+# #     len(col_order), row_order, col_order, original_matrix)
+#     except:
+#         failed.append(i)
+
+# failed = [37]
+# original_matrix = create_matrix(37)
+# print(original_matrix)
+# show_matrix_structure(original_matrix)
+# test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), 0.5)
+# col_order, row_order, blocks = test.solve()
+# reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
+#     len(col_order), row_order, col_order, original_matrix)
+# print(col_order, row_order, blocks)
+# show_matrix_structure(reordered_incidence_matrix)
+# print(failed)
 
 # edges = [(0,1),(0,3), (1,0), (1,2), (2,2), (3,1)]
 # m = 4
