@@ -1,7 +1,7 @@
 from pyomo.contrib.incidence_analysis.interface import IncidenceGraphInterface
 from pyomo.common.dependencies import scipy as sc
 from pyomo.contrib.incidence_restructuring.graph_partitioning_algo import graph_partitioning_algorithm
-from pyomo.contrib.incidence_restructuring.BBBD_algorithm import bbbd_algo
+from pyomo.contrib.incidence_restructuring.BBBD_decomposition import BBBD_algo
 from pyomo.common.collections import ComponentMap
 from pyomo.util.subsystems import create_subsystem_block
 import pyomo.environ as pyo
@@ -23,45 +23,14 @@ def get_incidence_matrix(m):
   incidence_matrix = igraph.incidence_matrix
   return igraph, incidence_matrix
 
-def create_adj_list_from_matrix(permuted_matrix):
-  return [(i,j) for i,j in zip(*permuted_matrix.nonzero())]
+def create_adj_list_from_matrix(matrix):
+  return [(i,j) for i,j in zip(*matrix.nonzero())]
 
-def create_perfect_matching(igraph, incidence_matrix):
-  # get perfect matching and maps to variables
-  perfect_matching = igraph.maximum_matching()
-  index_variable_map = {igraph.get_matrix_coord(perfect_matching[constraint]) : 
-                        perfect_matching[constraint] for constraint in perfect_matching}
-  index_constraint_map = {igraph.get_matrix_coord(constraint) : 
-                             constraint for constraint in perfect_matching}
-  # reorder the columns
-  col_order = [0]*incidence_matrix.shape[0]
-  for constraint in perfect_matching:
-    col_order[igraph.get_matrix_coord(constraint)] = \
-     igraph.get_matrix_coord(perfect_matching[constraint])
-  # # keep track of reordering
-  # col_map = {igraph.get_matrix_coord(constraint) : igraph.get_matrix_coord(
-  #     perfect_matching[constraint]) for constraint in perfect_matching}
-  # matrix operations to reorder
-  permutation_matrix = sc.sparse.eye(incidence_matrix.shape[1]).tocoo()
-  permutation_matrix.row = permutation_matrix.row[col_order]
-  permuted_matrix = incidence_matrix.dot(permutation_matrix)
-  return permuted_matrix, col_order, index_variable_map, index_constraint_map
-
-def get_adjacency_and_map_pyomo_model(m):
-  # get igraph object and incidence matrix for model
-  igraph, incidence_matrix = get_incidence_matrix(m)
-  # reorganize the matrix to have perfect matching
-  permuted_matrix, col_map, idx_var_map, idx_constr_map = create_perfect_matching(igraph, incidence_matrix)
-  # create the adjacency list
-  overall_adjacency = create_adj_list_from_matrix(permuted_matrix)
-  return overall_adjacency, col_map, permuted_matrix, idx_var_map, idx_constr_map
-
-
-def reorder_sparse_matrix(size, row_order, col_order, target_matrix):
-  permutation_matrix = sc.sparse.eye(size).tocoo()
+def reorder_sparse_matrix(m, n, row_order, col_order, target_matrix):
+  permutation_matrix = sc.sparse.eye(m).tocoo()
   permutation_matrix.col = permutation_matrix.col[row_order]
   permuted_matrix = permutation_matrix.dot(target_matrix)
-  permutation_matrix = sc.sparse.eye(size).tocoo()
+  permutation_matrix = sc.sparse.eye(n).tocoo()
   permutation_matrix.row = permutation_matrix.row[col_order]
   return permuted_matrix.dot(permutation_matrix)
 
@@ -69,64 +38,37 @@ def show_matrix_structure(matrix):
   plt.spy(matrix)
   plt.show()
 
+def get_variable_constraint_maps(m, igraph):
+  # variables = m.component_objects(pyo.Var)
+  # constraints = m.component_objects(pyo.Constraint)
+  index_variable_map = {igraph.get_matrix_coord(var) : var for var in igraph._variables}
+  constraint_variable_map = {igraph.get_matrix_coord(constr) : constr for constr in igraph._constraints}
+  return index_variable_map, constraint_variable_map
 
-def get_restructured_matrix(m, method=1, num_part=4, d_max=10, n_max = 2):
-  igraph, incidence_matrix = get_incidence_matrix(m)
-  matched_matrix, col_map, idx_var_map, idx_constr_map = create_perfect_matching(igraph, incidence_matrix)
-  overall_adjacency = create_adj_list_from_matrix(matched_matrix)
-
-  # restructure the matrix
+def get_restructured_matrix(model, method=1, fraction=0.5):
+  igraph, incidence_matrix = get_incidence_matrix(model)
+  m, n = incidence_matrix.shape
+  edge_list = create_adj_list_from_matrix(incidence_matrix)
+  assert method == 1
   if method == 1:
-    column_order, all_blocks, border_indices = bbbd_algo(overall_adjacency, 
-        get_adjacency_size(overall_adjacency), d_max, n_max)
-    
-    return column_order, all_blocks, col_map, method, idx_var_map, idx_constr_map, border_indices
+    # no graph partitioning, just algorithmic
+    bbbd_algo = BBBD_algo(edge_list, m, n, fraction)
+    # col_order, row_order, blocks
+    return *bbbd_algo.solve(), *get_variable_constraint_maps(model, igraph)
   
-  if method == 2:
-    column_order, partitions, border_indices = graph_partitioning_algorithm(num_part, 
-                                                      overall_adjacency)
-    
-    return column_order, partitions, col_map, method, idx_var_map, idx_constr_map, border_indices
-  
-def invert_order(order, array1):
-  return [order.index(elem) for elem in array1]
+def show_decomposed_matrix(model, method=1, fraction=0.2):
+  igraph, incidence_matrix = get_incidence_matrix(model)
+  #show_matrix_structure(incidence_matrix)
+  col_order, row_order, blocks, idx_var_map, idx_constr_map = \
+    get_restructured_matrix(model, method, fraction)
+  #print(len(blocks))
+  #print([len(i[0]) for i in blocks])
+  #reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
+  #    len(col_order), row_order, col_order, incidence_matrix)
+  #show_matrix_structure(reordered_incidence_matrix)
 
-def get_perfect_matched_cols_rows(order):
-  # indices in final restructuring
-  row_2 = range(len(order))
-  # indices from final restructuring to perfect matching
-  row_1 = invert_order(order, row_2)
-  col_1 = invert_order(order, row_2)
-  return row_1, col_1
 
-def update_keys(dictionary, array):
-  # returns a dictionary with updated keys
-  assert len(array) == len(dictionary)
-  return {i : dictionary[array[i]] for i in range(len(array))}
 
-def get_perfect_match_mapping(idx_var_map, perfect_matching_order):
-  # column update
-  return update_keys(idx_var_map, perfect_matching_order)
-
-def get_restructured_mapping(idx_var_map, idx_constr_map, bbbd_order):
-  # return constr, then var (row then column)
-  return update_keys(idx_constr_map, bbbd_order), update_keys(idx_var_map, bbbd_order)
-
-def get_mappings_to_original(bbbd_order, perfect_matching_order, idx_var_map, idx_constr_map):
-  # create a mapping from final indices to original variables/constraints
-  # start with original indices and update based on perfect matching
-  perfect_match_mapping_cols = get_perfect_match_mapping(idx_var_map, perfect_matching_order)
-  return idx_constr_map, perfect_match_mapping_cols
-  # turns out the final matrix is only restructured for visualization, so we just need perfect matching mapping
-  #return get_restructured_mapping(perfect_match_mapping_cols, idx_constr_map, bbbd_order)
-
-def reformat_blocks(method, blocks):
-  if method == 1:
-    # BBBD algorithm
-    return [[key for key in blocks[i].vertices] for i in blocks]
-  if method == 2:
-    # GP algorithm
-    return [blocks[key] for key in blocks]
 
 def filter_small_blocks(blocks):
   # only use blocks that are at least 10% of the largest block size
