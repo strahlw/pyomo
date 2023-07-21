@@ -34,6 +34,18 @@ def reorder_sparse_matrix(m, n, row_order, col_order, target_matrix):
   permutation_matrix.row = permutation_matrix.row[col_order]
   return permuted_matrix.dot(permutation_matrix)
 
+def save_matrix_structure(matrix, params):
+  fraction, num_blocks, size_border, size_system = params
+  name_file = "decompose_1D_HX_{}.png".format(fraction)
+  plt.figure(figsize=(12,8))
+  plt.spy(matrix)
+  plt.title("Fraction : {:.2f}  Num Blocks : {}  Size Border :  {}  Size System :  {}".format(fraction,
+                                                                        num_blocks, size_border, size_system))
+  plt.savefig("/nfs/home/strahlw/Documents/parallel_initialization_project/algorithm_hyperparameter_images/"
+           + name_file, dpi=300)
+  plt.close()
+  #plt.show()
+
 def show_matrix_structure(matrix):
   plt.spy(matrix)
   plt.show()
@@ -45,7 +57,9 @@ def get_variable_constraint_maps(m, igraph):
   constraint_variable_map = {igraph.get_matrix_coord(constr) : constr for constr in igraph._constraints}
   return index_variable_map, constraint_variable_map
 
-def get_restructured_matrix(model, method=1, fraction=0.5):
+def get_restructured_matrix(model, method=1, fraction=0.9):
+  # igraph = IncidenceGraphInterface(model, include_inequality=False)
+  # incidence_matrix = igraph.incidence_matrix
   igraph, incidence_matrix = get_incidence_matrix(model)
   m, n = incidence_matrix.shape
   edge_list = create_adj_list_from_matrix(incidence_matrix)
@@ -56,18 +70,28 @@ def get_restructured_matrix(model, method=1, fraction=0.5):
     # col_order, row_order, blocks
     return *bbbd_algo.solve(), *get_variable_constraint_maps(model, igraph)
   
-def show_decomposed_matrix(model, method=1, fraction=0.2):
+def show_decomposed_matrix(model, method=1, fraction=0.9):
   igraph, incidence_matrix = get_incidence_matrix(model)
-  #show_matrix_structure(incidence_matrix)
+  show_matrix_structure(incidence_matrix)
   col_order, row_order, blocks, idx_var_map, idx_constr_map = \
-    get_restructured_matrix(model, method, fraction)
-  #print(len(blocks))
-  #print([len(i[0]) for i in blocks])
-  #reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
-  #    len(col_order), row_order, col_order, incidence_matrix)
-  #show_matrix_structure(reordered_incidence_matrix)
+    get_restructured_matrix(model, method, 0.3)
+  print(len(blocks))
+  print([len(i[0]) for i in blocks])
+  reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
+     len(col_order), row_order, col_order, incidence_matrix)
+  show_matrix_structure(reordered_incidence_matrix)
 
-
+def save_algorithm_decomposition_images(model):
+  igraph, incidence_matrix = get_incidence_matrix(model)
+  for fraction in np.linspace(0.0, 1.0, 100):
+    col_order, row_order, blocks, idx_var_map, idx_constr_map = \
+      get_restructured_matrix(model, fraction=fraction)
+    num_blocks = len(blocks)
+    size_system = sum([len(blocks[i][0]) for i in range(len(blocks))])
+    size_border = len(idx_var_map) - size_system
+    reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
+      len(col_order), row_order, col_order, incidence_matrix)
+    save_matrix_structure(reordered_incidence_matrix, [fraction, num_blocks, size_border, size_system])
 
 
 def filter_small_blocks(blocks):
