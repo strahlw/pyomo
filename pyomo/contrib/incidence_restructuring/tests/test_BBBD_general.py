@@ -282,80 +282,67 @@ class TestSortingStructure(object):
         self.sorting_structure.increment_current_key()
         assert self.current_key == 3
 
-### DATA FOR TEST 1
-data_vertex_iter_0 = [[[],[],[],[],[],[],[],[]], \
-                    [[1,6,7],[0,5,7],[4,7],[0,2,3],[2,4],[0,2],[5],[5,6]],\
-                    [{1:0, 6:0, 7:0},{0:0, 5:0, 7:0}, {4:0, 7:0}, {0:0, 2:0, 3:0}, {2:0, 4:0}, {0:0, 2:0}, {5:0}, {5:0, 6:0}],\
-                    [1,1,1,1,1,1,1,1],\
-                    [3,3,2,3,2,2,1,2],\
-                    [1, None, None, 3, None, None, None, None]]
-
-
-
-
-data_constr_iter_0 = [[[],[],[],[],[],[],[],[]], \
-                     [0,0,0,0,0,0,0,0], \
-                     [[1,3,5], [0], [3,4,5], [3], [2,4], [1,6,7], [0,7], [0,1,2]],\
-                     [3,1,3,1,2,3,2,3]]
-
-
-
-data_blocks_iter_0 = []
-data_blocks_iter_1 = [[0, [6], [5], 1, [1,7], []]]
-
-data_ss_iter_0 = [{1: [0,1,2,3,4,5,6,7]}, 1, 1, [6,2,4,5,7,0,1,3]] 
                 
 
-
-def assert_data_vertices(computed, data_vertex, data_blocks):
-    # make objects out of data and then compare
-    expected = [VarVertex(i) for i in range(len(data_vertex[0]))]
-    for i in range(len(data_vertex[0])):
-        for j in data_vertex[0][i]:
-            # print(i,j, [k[3] for k in data_blocks if k[0] == j])
-            expected[i].add_adj_block(j,[k[3] if k[0] == j else 0 for k in data_blocks][0])
-        for j in data_vertex[1][i]:
-            expected[i].add_adj_constr(j, 0)
-        expected[i].constr_size = data_vertex[2][i]
-        expected[i].size_block = data_vertex[3][i]
-        expected[i].size_constraints = data_vertex[4][i]
-        expected[i].single_constraint = data_vertex[5][i]
-    for i in range(len(expected)):
-        assert expected[i] == computed[i]
-    #assert all(expected[i] == computed[i] for i in range(len(expected)))
+import numpy as np 
+import scipy as sc
+import matplotlib.pyplot as plt
+import random
+import sys
 
 
-def assert_data_constr(computed, data_constr):
-    expected = [ConstrVertex(i) for i in range(len(data_constr[0]))]
-    for i in range(len(data_constr[0])):
-        for j in data_constr[0][i]:
-            expected[i].add_adj_block(j, 1)
-        expected[i].size_block = data_constr[1][i]
-        for j in data_constr[2][i]:
-            expected[i].add_adj_var(j)
-        expected[i].size_variables = data_constr[3][i]
-    for i in range(len(computed)):
-        assert expected[i] == computed[i]
+def create_matrix(seed, size, fraction):
+    random.seed(seed)
+    size_matrix = size
+    size_matrix_m = size_matrix
+    size_matrix_n = size_matrix
+    fill_matrix = fraction # maximum possible fill per row before adding diagonal
+    original_matrix = np.zeros((size_matrix, size_matrix))
+    for i in range(size_matrix):
+        # for each row select a number of indices to make nonzero
+        num_non_zeros = random.randint(0,int((size_matrix-1)*fill_matrix/100))
+        indices_used = []
+        for j in range(num_non_zeros):
+            # for each non zero, randomly choose an index (and keep track)
+            if j == 0:
+                index_to_fill = random.randint(0, size_matrix-1)
+                original_matrix[i][index_to_fill] = 1
+                indices_used.append(index_to_fill)
+            else:
+                index_to_fill = random.randint(0, size_matrix-1)
+                while index_to_fill in indices_used:
+                    index_to_fill = random.randint(0, size_matrix-1)
+                original_matrix[i][index_to_fill] = 1
+                indices_used.append(index_to_fill)
+    return original_matrix
 
-def assert_data_blocks(computed, data_blocks):
-    blocks = {}
-    for i in range(len(data_blocks)):
-        block = Block(data_blocks[i][0])
-        for j in data_blocks[i][1]:
-            block.add_var(j)
-        for j in data_blocks[i][2]:
-            block.add_constr(j)
-        block.size = data_blocks[i][3]
-        for j in data_blocks[i][4]:
-            block.add_adj_var(j)
-        for j in data_blocks[i][5]:
-            block.add_adj_constr(j)
-        blocks[block.label] = block 
-    
-    for i in blocks:
-        assert blocks[i] == computed[i]
-    for i in computed:
-        assert blocks[i] == computed[i]
+def matrix_to_edges(matrix):
+    edges = []
+    for i in range(len(matrix)):
+        for j in range(len(matrix[0])):
+            if matrix[i][j] == 1:
+                edges.append((i,j))
+    return edges 
+
+
+def test_random_matrices_10_100_05():
+    # make sure that the assertions are enabled (self.check_assertions = True in BBBD_algo)
+    seeds = range(100)
+    for i in seeds:
+        #print("Instance ", i)
+        original_matrix = create_matrix(i, 10, 60)
+        test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), 0.5)
+        col_order, row_order, blocks = test.solve()
+
+
+def test_random_matrices_20_100_07():
+    # make sure that the assertions are enabled (self.check_assertions = True in BBBD_algo)
+    seeds = range(100)
+    for i in seeds:
+        #print("Instance ", i)
+        original_matrix = create_matrix(i, 20, 60)
+        test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), 0.7)
+        col_order, row_order, blocks = test.solve()
     
     
 

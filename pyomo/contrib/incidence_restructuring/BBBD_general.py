@@ -607,9 +607,6 @@ class BBBD_algo(object):
             if adj_constr != self.selected_constraint and not self.blocks[self.seed_block].constr.check_in(adj_constr):
                 self.blocks[self.seed_block].add_adj_constr(adj_constr)
                 for var in self.blocks[self.seed_block].adj_var:
-                    # if var == 3:
-                    #     print("Size of var 3 remove 1 = ", self.variables[var].size_block_combined)
-                    #     self.sorting_structure.print_data()
                     if not self.variables[var].adj_constr.check_in(adj_constr) and var != self.selected_variable:
                         self.variables[var].add_adj_constr(adj_constr, self.constraints[adj_constr].size_block)
                         self.constraints[adj_constr].add_adj_var(var)    
@@ -620,9 +617,6 @@ class BBBD_algo(object):
         for var in self.blocks[self.seed_block].adj_var:
             if var != self.selected_variable:
                 self.set_associated_constraint_var(var)
-            # if var == 3:
-            #     print("Size of var 3 add = ", self.variables[var].size_block_combined)
-            #     self.sorting_structure.print_data()
             # self.sorting_structure.add_data(self.variables[var].size_block_combined, var)
 
         # update the variables       
@@ -980,59 +974,59 @@ class BBBD_algo(object):
         return column_order, row_order, self.get_blocks()
 
 
-import numpy as np 
-import scipy as sc
-import matplotlib.pyplot as plt
-import random
-import sys
+# import numpy as np 
+# import scipy as sc
+# import matplotlib.pyplot as plt
+# import random
+# import sys
 
 
-def create_matrix(seed):
-    random.seed(seed)
-    size_matrix = 20
-    size_matrix_m = size_matrix
-    size_matrix_n = size_matrix
-    fill_matrix = 60 # maximum possible fill per row before adding diagonal
-    original_matrix = np.zeros((size_matrix, size_matrix))
-    for i in range(size_matrix):
-        # for each row select a number of indices to make nonzero
-        num_non_zeros = random.randint(0,int((size_matrix-1)*fill_matrix/100))
-        indices_used = []
-        for j in range(num_non_zeros):
-            # for each non zero, randomly choose an index (and keep track)
-            if j == 0:
-                index_to_fill = random.randint(0, size_matrix-1)
-                original_matrix[i][index_to_fill] = 1
-                indices_used.append(index_to_fill)
-            else:
-                index_to_fill = random.randint(0, size_matrix-1)
-                while index_to_fill in indices_used:
-                    index_to_fill = random.randint(0, size_matrix-1)
-                original_matrix[i][index_to_fill] = 1
-                indices_used.append(index_to_fill)
-    return original_matrix
+# def create_matrix(seed):
+#     random.seed(seed)
+#     size_matrix = 20
+#     size_matrix_m = size_matrix
+#     size_matrix_n = size_matrix
+#     fill_matrix = 60 # maximum possible fill per row before adding diagonal
+#     original_matrix = np.zeros((size_matrix, size_matrix))
+#     for i in range(size_matrix):
+#         # for each row select a number of indices to make nonzero
+#         num_non_zeros = random.randint(0,int((size_matrix-1)*fill_matrix/100))
+#         indices_used = []
+#         for j in range(num_non_zeros):
+#             # for each non zero, randomly choose an index (and keep track)
+#             if j == 0:
+#                 index_to_fill = random.randint(0, size_matrix-1)
+#                 original_matrix[i][index_to_fill] = 1
+#                 indices_used.append(index_to_fill)
+#             else:
+#                 index_to_fill = random.randint(0, size_matrix-1)
+#                 while index_to_fill in indices_used:
+#                     index_to_fill = random.randint(0, size_matrix-1)
+#                 original_matrix[i][index_to_fill] = 1
+#                 indices_used.append(index_to_fill)
+#     return original_matrix
 
 
-def reorder_sparse_matrix(m, n, row_order, col_order, target_matrix):
-  target_matrix = sc.sparse.coo_matrix(target_matrix)
-  permutation_matrix = sc.sparse.eye(m).tocoo()
-  permutation_matrix.col = permutation_matrix.col[row_order]
-  permuted_matrix = permutation_matrix.dot(target_matrix)
-  permutation_matrix = sc.sparse.eye(n).tocoo()
-  permutation_matrix.row = permutation_matrix.row[col_order]
-  return permuted_matrix.dot(permutation_matrix)
+# def reorder_sparse_matrix(m, n, row_order, col_order, target_matrix):
+#   target_matrix = sc.sparse.coo_matrix(target_matrix)
+#   permutation_matrix = sc.sparse.eye(m).tocoo()
+#   permutation_matrix.col = permutation_matrix.col[row_order]
+#   permuted_matrix = permutation_matrix.dot(target_matrix)
+#   permutation_matrix = sc.sparse.eye(n).tocoo()
+#   permutation_matrix.row = permutation_matrix.row[col_order]
+#   return permuted_matrix.dot(permutation_matrix)
 
-def show_matrix_structure(matrix):
-  plt.spy(matrix)
-  plt.show()
+# def show_matrix_structure(matrix):
+#   plt.spy(matrix)
+#   plt.show()
 
-def matrix_to_edges(matrix):
-    edges = []
-    for i in range(len(matrix)):
-        for j in range(len(matrix[0])):
-            if matrix[i][j] == 1:
-                edges.append((i,j))
-    return edges 
+# def matrix_to_edges(matrix):
+#     edges = []
+#     for i in range(len(matrix)):
+#         for j in range(len(matrix[0])):
+#             if matrix[i][j] == 1:
+#                 edges.append((i,j))
+#     return edges 
 
 # # original_matrix = np.array([[0,0],[0,0]])
 # # print(original_matrix)
