@@ -144,6 +144,13 @@ class VarVertex(Vertex):
             self.adj_constr.add(label)
             self.constr_size[label] = constr_size
             self.size_constraints += 1
+
+    def add_adj_constr_no_size(self, label, constr_size):
+        if not self.adj_constr.check_in(label):
+            self.adj_constr.add(label)
+            self.constr_size[label] = constr_size
+            # self.size_constraints += 1
+
     
     def remove_adj_constr(self, label):
         if self.adj_constr.check_in(label):

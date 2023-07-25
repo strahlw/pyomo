@@ -517,7 +517,7 @@ class BBBD_algo(object):
         # for debugging
         self.iteration_counter = 0
 
-        self.print_data = True
+        self.print_data = False
         if self.print_data:
             self.sorting_structure.set_printing_data()
         self.check_assertions = True
@@ -1044,27 +1044,27 @@ def matrix_to_edges(matrix):
 # for i in seeds:
 #     print("Instance ", i)
 #     original_matrix = create_matrix(i)
-#     test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), 0.3)
+#     test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), 0.5)
 #     # try:
 #     col_order, row_order, blocks = test.solve()
 
-#         print(max(test.blocks[i].size for i in test.blocks))
-#         print([test.blocks[i].size for i in test.blocks])
+#     print(max(test.blocks[i].size for i in test.blocks))
+#     print([test.blocks[i].size for i in test.blocks])
 # reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
 #     len(col_order), row_order, col_order, original_matrix)
 #     except:
 #         failed.append(i)
 
 #failed = [8]
-original_matrix = create_matrix(14)
-print(original_matrix)
-# show_matrix_structure(original_matrix)
-test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), 1.1)
-col_order, row_order, blocks = test.solve()
-reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
-    len(col_order), row_order, col_order, original_matrix)
-print(col_order, row_order, blocks)
-show_matrix_structure(reordered_incidence_matrix)
+# original_matrix = create_matrix(14)
+# print(original_matrix)
+# # show_matrix_structure(original_matrix)
+# test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), 1.1)
+# col_order, row_order, blocks = test.solve()
+# reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
+#     len(col_order), row_order, col_order, original_matrix)
+# print(col_order, row_order, blocks)
+# show_matrix_structure(reordered_incidence_matrix)
 # print(failed)
 
 # edges = [(0,1),(0,3), (1,0), (1,2), (2,2), (3,1)]
