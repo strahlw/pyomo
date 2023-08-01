@@ -1,12 +1,13 @@
 import pymetis as pymetis
 import pyomo.environ as pyo
 import sys
+import os
 
 def partition_graph(num_partitions, adjacency):
   n_cuts, membership = pymetis.part_graph(num_partitions, adjacency=adjacency)
   return n_cuts, membership
 
-def get_column_order_partitions(num_part, adjacency_list, edge_set, membership):
+def get_column_order_partitions(num_part, adjacency_list, edge_set, membership, folder):
   # initialize the model
   m_border = pyo.ConcreteModel()
 
@@ -49,7 +50,7 @@ def get_column_order_partitions(num_part, adjacency_list, edge_set, membership):
     return sum(m_border.y[i] for i in m_border.i)
 
   solver = pyo.SolverFactory('glpk')
-  solution = solver.solve(m_border, tee=True)
+  solution = solver.solve(m_border, os.path.join(folder,"gp_logfile.log"))
 
   assert all(pyo.value(m_border.y[i]) == 0 or pyo.value(m_border.y[i]) == 1 for i in m_border.i)
   vertex_included = [bool(pyo.value(m_border.y[i])) for i in m_border.i]
@@ -68,14 +69,14 @@ def get_column_order_partitions(num_part, adjacency_list, edge_set, membership):
   final_columns = order_columns + border_columns
   return final_columns, partitions, border_indices
 
-def graph_partitioning_algorithm(num_part, adjacency_list):
+def graph_partitioning_algorithm(num_part, adjacency_list, folder):
   edge_set = [[(i,j) for j in adjacency_list[i]] for i in range(len(adjacency_list))]
   edge_set = [elem for array in edge_set for elem in array]
   adjacency_list_pymetis = [[k for k in adjacency_list[i]] for i in adjacency_list]
   n_cuts, membership = partition_graph(num_part, adjacency_list_pymetis)
-  return get_column_order_partitions(num_part, adjacency_list, edge_set, membership)
+  return get_column_order_partitions(num_part, adjacency_list, edge_set, membership, folder)
 
-def get_partitions_general(num_part, edge_set, membership, num_vars, num_constr):
+def get_partitions_general(num_part, edge_set, membership, num_vars, num_constr, folder):
   # initialize the model
   m_border = pyo.ConcreteModel()
 
@@ -126,7 +127,7 @@ def get_partitions_general(num_part, edge_set, membership, num_vars, num_constr)
     return sum(m_border.y[i] for i in m_border.i)
 
   solver = pyo.SolverFactory('glpk')
-  solution = solver.solve(m_border, tee=True)
+  solution = solver.solve(m_border, logfile=os.path.join(folder,"gp_logfile.log"))
 
   assert all(pyo.value(m_border.y[i]) <= 1e-4 or pyo.value(m_border.y[i]) >= 0.999 for i in m_border.i)
   assert all(pyo.value(m_border.w[j]) <= 1e-4 or pyo.value(m_border.w[j]) >= 0.999 for j in m_border.j)
@@ -162,10 +163,10 @@ def get_partitions_general(num_part, edge_set, membership, num_vars, num_constr)
   final_columns = order_columns + border_constr
   return final_columns, final_rows, [[partitions[k][1], partitions[k][0]] for k in partitions]
 
-def graph_partitioning_algorithm_general(num_part, edge_set, adjacency_list, num_vars, num_constr):
+def graph_partitioning_algorithm_general(num_part, edge_set, adjacency_list, num_vars, num_constr, folder):
   n_cuts, membership = partition_graph(num_part, adjacency_list)
   membership = [[membership[i] for i in range(num_vars)], [membership[j] for j in range(num_vars, num_vars + num_constr)]]
-  return get_partitions_general(num_part, edge_set, membership, num_vars, num_constr)
+  return get_partitions_general(num_part, edge_set, membership, num_vars, num_constr, folder)
 
 
 ##################################################################################################
