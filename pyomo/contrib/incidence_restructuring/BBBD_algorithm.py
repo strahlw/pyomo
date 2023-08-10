@@ -168,9 +168,10 @@ class BorderVertexData(object):
     print("Adjacent border vertices = ", list(self.adj_border_vert.keys()))
     print("Adjacent blocks = ", list(self.adj_block.keys()))
 
-def bbbd_algo(x_adjacency, x_size, d_max, n_max, print_debug=False):
+def bbbd_algo(x_adjacency, x_size, d_max, n_max, fraction_tol, print_debug=False):
   # for all the vertices that are not already assigned to the block
   border_vertices = {i : "" for i in x_adjacency if x_size[i] >= d_max}
+  size_problem = len(x_adjacency)
   if print_debug:
     print(border_vertices)
   # the incidence lists
@@ -230,7 +231,7 @@ def bbbd_algo(x_adjacency, x_size, d_max, n_max, print_debug=False):
   # for now, the termination criteria will be the one prescribed in the paper, i.e., once an addition to a block makes the block larger than the number of elements left in the border, we are done
 
   border_vertices_extended = {i : "" for i in list(border_vertices.keys()) + list(additional_border_vertices.keys())}
-
+  size_border = len(border_vertices_extended)
   # update block data structures with adjacent vertices
   # work through this
   for block in all_blocks:
@@ -302,9 +303,12 @@ def bbbd_algo(x_adjacency, x_size, d_max, n_max, print_debug=False):
       print("Size of newly formed block = ", new_size_of_block)
       print("Border size = ", border_size)
 
-    # this is the base case
-    if new_size_of_block > border_size:
+    # this is the base case -> change this to the size of the border is some fraction of the original size
+    fraction_border = border_size / size_problem
+    if fraction_border < fraction_tol:
       break
+    # if new_size_of_block > border_size:
+    #   break
     if print_debug:
       print(new_size_of_block)
 
@@ -474,3 +478,92 @@ def bbbd_algo(x_adjacency, x_size, d_max, n_max, print_debug=False):
   border_columns = [column for column in range(len(x_adjacency)) if column not in order_columns]
   final_columns = order_columns + border_columns
   return final_columns, all_blocks, border_indices
+
+# import random
+# import numpy as np
+# import matplotlib.pyplot as plt
+# import scipy as sc
+# def create_matrix(seed, size, fill):
+#     random.seed(seed)
+#     size_matrix = size
+#     size_matrix_m = size_matrix
+#     size_matrix_n = size_matrix
+#     fill_matrix = fill # maximum possible fill per row before adding diagonal
+#     original_matrix = np.zeros((size_matrix, size_matrix))
+#     for i in range(size_matrix):
+#         # for each row select a number of indices to make nonzero
+#         num_non_zeros = random.randint(0,int((size_matrix-1)*fill_matrix/100))
+#         indices_used = []
+#         for j in range(num_non_zeros):
+#             # for each non zero, randomly choose an index (and keep track)
+#             if j == 0:
+#                 index_to_fill = random.randint(0, size_matrix-1)
+#                 original_matrix[i][index_to_fill] = 1
+#                 indices_used.append(index_to_fill)
+#             else:
+#                 index_to_fill = random.randint(0, size_matrix-1)
+#                 while index_to_fill in indices_used:
+#                     index_to_fill = random.randint(0, size_matrix-1)
+#                 original_matrix[i][index_to_fill] = 1
+#                 indices_used.append(index_to_fill)
+#     # impose perfectly matched criteria
+#     for i in range(size_matrix):
+#       original_matrix[i][i] = 1
+#     return original_matrix
+
+
+# def reorder_sparse_matrix(m, n, row_order, col_order, target_matrix):
+#   target_matrix = sc.sparse.coo_matrix(target_matrix)
+#   permutation_matrix = sc.sparse.eye(m).tocoo()
+#   permutation_matrix.col = permutation_matrix.col[row_order]
+#   permuted_matrix = permutation_matrix.dot(target_matrix)
+#   permutation_matrix = sc.sparse.eye(n).tocoo()
+#   permutation_matrix.row = permutation_matrix.row[col_order]
+#   return permuted_matrix.dot(permutation_matrix)
+
+# def show_matrix_structure(matrix):
+#   plt.spy(matrix)
+#   plt.show()
+
+# def matrix_to_edges(matrix):
+#     edges = []
+#     for i in range(len(matrix)):
+#         for j in range(len(matrix[0])):
+#             if matrix[i][j] == 1:
+#                 edges.append((i,j))
+#     return edges 
+
+# def create_adj_list_from_matrix(permuted_matrix):
+#   # x_adjacency = {i : [] for i in range(permuted_matrix.shape[1])}
+#   # y_adjacency = {i : [] for i in range(permuted_matrix.shape[0])}
+#   overall_adjacency = {i : [] for i in range(permuted_matrix.shape[0])}
+#   for i, j in zip(*permuted_matrix.nonzero()):
+#     if i not in overall_adjacency[j]:
+#       overall_adjacency[j].append(i)
+#     if i != j and j not in overall_adjacency[i]:
+#       overall_adjacency[i].append(j)
+#   #overall_adjacency = {i : [j for j in range(max(permuted_matrix.shape[1], permuted_matrix.shape[0])) if (j in x_adjacency[i] or j in y_adjacency[i])] for i in x_adjacency} 
+#   return overall_adjacency
+
+# def get_adjacency_size(adjacency_list):
+#   return {i : len(adjacency_list[i]) for i in adjacency_list}
+
+
+# original_matrix = np.array([[0,0],[0,0]])
+# print(original_matrix)
+# show_matrix_structure(original_matrix)
+# x_adjacency, x_size, d_max, n_max, fraction_tol
+
+# size_matrix = 100
+# fill = 3
+# fraction = 0.1
+# original_matrix = create_matrix(40, size_matrix, fill)
+# adjacency_list = create_adj_list_from_matrix(original_matrix)
+# final_cols, all_blocks, border_indices = bbbd_algo(adjacency_list, get_adjacency_size(adjacency_list), 1, 2, fraction)
+# print([all_blocks[block].size for block in all_blocks])
+# print("fraction = ", fraction)
+# print("actual = ", len(border_indices)/size_matrix)
+# reordered_incidence_matrix = reorder_sparse_matrix(len(final_cols),
+#     len(final_cols), final_cols, final_cols, original_matrix)
+# show_matrix_structure(reordered_incidence_matrix)
+

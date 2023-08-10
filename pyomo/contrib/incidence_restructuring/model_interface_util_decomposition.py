@@ -101,14 +101,14 @@ def get_adjacency_and_map_pyomo_model(m):
 def get_adjacency_size(adjacency_list):
   return {i : len(adjacency_list[i]) for i in adjacency_list}
 
-def get_restructured_matrix_matched(incidence_matrix, igraph, folder, method=1, num_part=4, d_max=10, n_max = 2):
+def get_restructured_matrix_matched(incidence_matrix, igraph, folder, method=1, num_part=4, d_max=10, n_max = 2, border_fraction=0.5):
   matched_matrix, col_map, idx_var_map, idx_constr_map = create_perfect_matching(igraph, incidence_matrix)
   overall_adjacency = create_adj_list_from_matrix(matched_matrix)
   assert method == 1 or method == 2
   # restructure the matrix
   if method == 1:
     column_order, all_blocks, border_indices = bbbd_algo(overall_adjacency, 
-        get_adjacency_size(overall_adjacency), d_max, n_max)
+        get_adjacency_size(overall_adjacency), d_max, n_max, border_fraction)
     
     return column_order, column_order, reformat_blocks(method, all_blocks), \
       col_map, idx_var_map, idx_constr_map
@@ -226,16 +226,16 @@ def get_restructured_matrix(incidence_matrix, igraph, model, folder,
         *get_variable_constraint_maps(igraph)
 
 def get_restructured_matrix_general(incidence_matrix, igraph, model, folder, 
-    method=1, fraction=0.9, num_part=4, matched=False, d_max=2, n_max=1):
+    method=1, fraction=0.9, num_part=4, matched=False, d_max=2, n_max=1, border_fraction=0.5):
   # wrapper for the matched version and non-matched versions of the algorithm
   if not matched:
     return get_restructured_matrix(incidence_matrix, igraph, model, folder, 
     method, fraction, num_part)
-  else: # not matched 
+  else: # matched 
     # need to return col order, row order, blocks, idx_var_map, idx_constr_map
     col_order, row_order, blocks, col_map, idx_var_map, idx_constr_map = \
       get_restructured_matrix_matched(incidence_matrix, igraph, folder, method=method, 
-          num_part=num_part, d_max=d_max, n_max=n_max)
+          num_part=num_part, d_max=d_max, n_max=n_max, border_fraction=border_fraction)
     idx_constr_map, idx_var_map = get_mappings_to_original(col_order, col_map, idx_var_map, idx_constr_map)
     return col_order, row_order, blocks, idx_var_map, idx_constr_map
 
@@ -512,7 +512,7 @@ def activate_constraints(model):
 
 def initialization_strategy(model, folder, method=2, num_part=4, fraction=0.5, 
   matched=False, d_max=1, n_max=2, solver="ipopt", use_init_heur="True", use_fbbt="True",
-  max_iteration=100, algo_configuration=algorithmConfiguration()):
+  max_iteration=100, border_fraction=0.5, algo_configuration=algorithmConfiguration()):
   # the solver option default is a warm-start or an initial point
   # this provides a heuristic to give the solvers a starting point
   #assert use_init_heur == True 
@@ -553,7 +553,7 @@ def initialization_strategy(model, folder, method=2, num_part=4, fraction=0.5,
       var.setlb(1e-15)
   col_order, row_order, blocks, idx_var_map, idx_constr_map = \
     get_restructured_matrix_general(incidence_matrix, igraph, model, folder, method, fraction, num_part, matched, 
-      d_max, n_max)
+      d_max, n_max, border_fraction)
   constr_list = [i[1] for i in blocks]
   complicating_constr = get_list_of_complicating_constraints(blocks, idx_constr_map)
   complicating_constr_idxs = get_list_complicating_constraint_indices(blocks, idx_constr_map)
