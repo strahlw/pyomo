@@ -7,6 +7,7 @@ import scipy as sc
 import pyomo.common.unittest as unittest
 import pytest as pytest
 import numpy as np
+import math
 
     
 def test_reorder_sparse_matrix():
@@ -385,8 +386,127 @@ class TestBlockDecompositionForSolverMatched():
                 for i in expected_constraints:
                     assert i in [j.name for j in constraints]
 
+class TestConstraintConsensus():
+    @pytest.fixture(autouse=True)  
+    def set_model(self, request):
+        self.m = pyo.ConcreteModel()
+        self.m.x1 = pyo.Var(name="x1")
+        self.m.x2 = pyo.Var(name="x2")
+        self.m.x3 = pyo.Var(name="x3")
+        self.m.x4 = pyo.Var(name="x4")
+        self.m.x5 = pyo.Var(name="x5")
+        self.m.x6 = pyo.Var(name="x6")
 
+        self.m.cons1 = pyo.Constraint(expr=self.m.x2 + self.m.x4 + self.m.x5 == 1.5)
+        self.m.cons2 = pyo.Constraint(expr=self.m.x1 + self.m.x3 == 1)
+        self.m.cons3 = pyo.Constraint(expr=self.m.x3 == 0.5)
+        self.m.cons4 = pyo.Constraint(expr=self.m.x2 == 0.5)
+        self.m.cons5 = pyo.Constraint(expr=self.m.x1 + self.m.x3 + self.m.x5 == 1.5)
+        self.m.cons6 = pyo.Constraint(expr=self.m.x2 + self.m.x4 + self.m.x6 == 1.5)
+
+        self.m.x1.value = 1
+        self.m.x2.value = 1
+        self.m.x3.value = 1
+        self.m.x4.value = 0
+        self.m.x5.value = 0
+        self.m.x6.value = 0
+
+        self.constraints = [constr for constr in self.m.component_objects(pyo.Constraint)]
+        self.variables = [var for var in self.m.component_objects(pyo.Var)]
     
+    def test_determine_d_constr(self):
+        d_s = [determine_d_constr(constr) for constr in self.constraints]
+        expected_d_s = [1, -1, -1, -1, -1, 1]
+        assert d_s == expected_d_s
+        # assert False
+    def test_get_constraint_gradient(self):
+        grad = []
+        for constraint in self.constraints:
+            grad.append(get_constraint_gradient(constraint))
+        grad_expected = [[1,1,1], [1,1], [1], [1], [1,1,1], [1,1,1]]
+        assert grad == grad_expected
+
+    def test_get_constraint_gradient_all_vars(self):
+        # keep track of index to variable for gradient
+        vars = list(var for var in self.m.component_objects(pyo.Var))
+        grads = list(get_constraint_gradient_all_vars(constr, vars) for constr in self.constraints)
+        expected_grads = [[0,1,0,1,1,0], [1,0,1,0,0,0], [0,0,1,0,0,0],\
+                          [0,1,0,0,0,0], [1,0,1,0,1,0], [0,1,0,1,0,1]]
+        assert grads == expected_grads
+
+    def test_norm_l2(self):
+        vector = [1,0,-1]
+        norm = norm_l2(vector)
+        assert norm == math.sqrt(2)
+
+        vector = [-2, 3, 4]
+        norm = norm_l2(vector)
+        assert norm == math.sqrt(29)
+    
+    def test_get_constraint_violation(self):
+        violations = [get_constraint_violation(constr) for constr in self.constraints]
+        expected_violations = [0.5, 1, 0.5, 0.5, 0.5, 0.5]
+        assert violations == expected_violations
+
+    def test_adjust_consensus_value(self):
+        lb = -1
+        ub = 1
+        val = 2
+        assert adjust_consensus_value(val, lb, ub) == 1
+
+        val = -2
+        assert adjust_consensus_value(val, lb, ub) == -1
+
+        val = 0
+        assert adjust_consensus_value(val, lb, ub) == 0
+
+    def test_constraint_consensus(self):
+        #d, v, grad_constr, norm_grad_constr, squared_norm_grad_constr, s, \
+        fv_consensus, distances, s = constraint_consensus(self.constraints, self.variables, 0.01) 
+        # assert all(d == [1, -1, -1, -1, -1, 1])
+        # assert all(v == [0.5, 1, 0.5, 0.5, 0.5, 0.5])
+        # expected_grad_constr = list(np.array(i) for i in [[0,1,0,1,1,0], [1,0,1,0,0,0], [0,0,1,0,0,0],\
+        #                   [0,1,0,0,0,0], [1,0,1,0,1,0], [0,1,0,1,0,1]])
+        # assert all(all(grad_constr[i] == expected_grad_constr[i]) for i in range(len(grad_constr)))
+        # assert norm_grad_constr == [math.sqrt(3), math.sqrt(2), 1, 1, math.sqrt(3), math.sqrt(3)]
+        # exp_sngc = [3,2,1,1,3,3]
+        # assert all(list(abs(squared_norm_grad_constr[i] - exp_sngc[i]) < 1e-10 for i in range(len(exp_sngc))))
+        # exp_s = [2,3,3,2,2,1]
+        # assert all(list(abs(s[i] - exp_s[i]) < 1e-10 for i in range(len(s))))
+        expected_fv_consensus = [-1/3, -1/18, -7/18, 1/6, 0, 1/6]
+        assert all(list(abs(expected_fv_consensus[i] - fv_consensus[i]) < 1e-10 for i in range(len(fv_consensus))))
+        expected_distances = [0.5/math.sqrt(3), 1/math.sqrt(2), 1/2, 1/2, 0.5/math.sqrt(3), 0.5/math.sqrt(3)]
+        assert all(list(abs(expected_distances[i] - distances[i]) < 1e-10 for i in range(len(distances))))
+       
+        fv_consensus, distances, s = constraint_consensus(self.constraints, self.variables, 0.5/math.sqrt(3)+0.01) 
+        expected_fv_consensus = [-1/2, -1/2, -1/2, 0, 0, 0]
+        assert all(list(abs(expected_fv_consensus[i] - fv_consensus[i]) < 1e-10 for i in range(len(fv_consensus))))
+        expected_distances = [0.5/math.sqrt(3), 1/math.sqrt(2), 1/2, 1/2, 0.5/math.sqrt(3), 0.5/math.sqrt(3)]
+        assert all(list(abs(expected_distances[i] - distances[i]) < 1e-10 for i in range(len(distances))))
+        
+        vars = [self.variables[i] for i in range(len(self.variables)) if i%2==0 ]
+        fv_consensus, distances, s = constraint_consensus(self.constraints, vars, 0.01) 
+        expected_fv_consensus = [-1/3, -7/18,  1/6]
+        assert all(list(abs(expected_fv_consensus[i] - fv_consensus[i]) < 1e-10 for i in range(len(fv_consensus))))
+        expected_distances = [0.5, 1/math.sqrt(2), 1/2,  0.5/math.sqrt(3)]
+        assert all(list(abs(expected_distances[i] - distances[i]) < 1e-10 for i in range(len(distances))))
+       
+        # self.m.cons1 = pyo.Constraint(expr=self.m.x2 + self.m.x4 + self.m.x5 == 1.5)
+        # self.m.cons2 = pyo.Constraint(expr=self.m.x1 + self.m.x3 == 1)
+        # self.m.cons3 = pyo.Constraint(expr=self.m.x3 == 0.5)
+        # self.m.cons4 = pyo.Constraint(expr=self.m.x2 == 0.5)
+        # self.m.cons5 = pyo.Constraint(expr=self.m.x1 + self.m.x3 + self.m.x5 == 1.5)
+        # self.m.cons6 = pyo.Constraint(expr=self.m.x2 + self.m.x4 + self.m.x6 == 1.5)
+
+        # self.m.x1.value = 1
+        # self.m.x2.value = 1
+        # self.m.x3.value = 1
+        # self.m.x4.value = 0
+        # self.m.x5.value = 0
+        # self.m.x6.value = 0
+
+
+
 # class TestInitialization():
 #     # solution is x_i = 0.5
 #     @pytest.fixture(autouse=True)
@@ -417,3 +537,4 @@ class TestBlockDecompositionForSolverMatched():
     
 
 
+        

@@ -3,19 +3,55 @@ from pyomo.common.dependencies import scipy as sc
 from pyomo.contrib.incidence_restructuring.graph_partitioning_algo import (
     graph_partitioning_algorithm_general, graph_partitioning_algorithm
 )
+from pyomo.core.expr import differentiate
+from pyomo.core.expr.current import identify_variables
 from pyomo.contrib.incidence_restructuring.BBBD_general import BBBD_algo
 from pyomo.contrib.incidence_restructuring.BBBD_algorithm import bbbd_algo
 from pyomo.common.collections import ComponentMap
 from pyomo.util.subsystems import create_subsystem_block
 from pyomo.contrib.fbbt.fbbt import fbbt
+from pyomo.opt.results.solver import check_optimal_termination, TerminationCondition
+# comp,
+#     deactivate_satisfied_constraints=False,
+#     integer_tol=1e-5,
+#     feasibility_tol=1e-8,
+#     max_iter=10,
+#     improvement_tol=1e-4,
+#     descend_into=True,
 from pyomo.core.base.var import IndexedVar
 import pyomo.environ as pyo
 import matplotlib.pyplot as plt
 import numpy as np
 import os
 import sys 
+import math
 import random 
 random.seed(8900)
+
+class algorithmConfiguration(object):
+  def __init__(self):
+    # objective 0 -> feasibility (i.e. obj = 0)
+    # objective 1 -> min sum of squared violations 
+    self.phase_I = {"subproblem_objective" : 0, "nonlinear_program" : 1}
+    # constraints 0 -> just the complicating constraints
+    # constraints 1 -> all the constraints (only applicable to minimizing violations)
+    self.phase_II = {"subproblem_objective" : 0, "constraints" : 0, "nonlinear_program" : 1}
+    self.config = 1
+
+  def set_configuration(self, config):
+    self.config = config
+    # configuration 1 - default construction 
+    # config 2 - systems minimize squared violations
+    # config 3 - complicating constraint objective is minimizing squared violations
+    # config 4 - both problems' objectives are minimizing squared violations
+    if config in [2,4,6]:
+      self.phase_I["subproblem_objective"] = 1
+    if config in [3,4,5,6]:
+      self.phase_II["subproblem_objective"] = 1
+    if config in [5,6]:
+      self.phase_II["constraints"] = 1
+    return
+  
 ###############
 ### PERFECT MATCHING FUNCTIONS
 ##############
@@ -249,57 +285,84 @@ def save_algorithm_decomposition_images_gp(model):
       len(col_order), row_order, col_order, incidence_matrix)
     save_matrix_structure(reordered_incidence_matrix, [num_part, num_blocks, size_border, size_system, index])
 
-
-# def filter_small_blocks(blocks):
-#   # only use blocks that are at least 10% of the largest block size
-#   # eliminates erratic behavior of solving very small systems
-#   return [i for i in blocks if len(i) >= 0.1*max(len(j) for j in blocks)]   
-
-def create_subsystem_from_constr_list(constr_idx_list, constr_map):
+def create_subsystem_from_constr_list(model, constr_idx_list, constr_map, name):
   # get constraint names
   constr_obj = [constr_map[i] for i in constr_idx_list]
-  block = create_subsystem_block(constr_obj, include_fixed=True)
-  block.obj = pyo.Objective(expr = create_residual_objective_expression(constr_obj))
+  model.add_component(name, create_subsystem_block(constr_obj))
+  model.find_component(name).obj = pyo.Objective(expr = 1/1e10 *create_residual_objective_expression(constr_obj))
+  #model.find_component(name).obj = pyo.Objective(expr = create_residual_objective_expression(constr_obj))
   for constr in constr_obj:
     constr.deactivate()
-  return block
+  return
 
-def create_subsystem_from_constr_list_no_obj(constr_idx_list, constr_map):
+def create_subsystem_from_constr_list_no_obj(model, constr_idx_list, constr_map, name):
   constr_obj = [constr_map[i] for i in constr_idx_list]
-  block = create_subsystem_block(constr_obj, include_fixed=True)
-  return block
+  model.add_component(name, create_subsystem_block(constr_obj))
+  model.find_component(name).obj = pyo.Objective(expr = 0)
+  return
 
-def create_subsystem_from_block(block, constr_map):
-  # block is list of indices
-  # what to do about inequalities???
-  # get constraint names
-  constr_obj = [constr_map[i] for i in block]
-  # the subsystem function will automatically populate the variables
-  return create_subsystem_block(constr_obj, include_fixed=True)
+def create_subsystems(model, constr_lists, constr_map, no_objective=True):
+  names = []
+  for idx, constr_list in enumerate(constr_lists):
+    name = f"subsystem_{idx}"
+    names.append(name)
+    if no_objective:
+      create_subsystem_from_constr_list_no_obj(model, constr_list, constr_map, name)
+    else:
+      create_subsystem_from_constr_list(model, constr_list, constr_map, name)
+  return names
 
-def create_subsystems_block(blocks, constr_map):
-  return [create_subsystem_from_block(j, constr_map) for i,j in blocks]
-
-
-def create_subsystems(constr_lists, constr_map, no_objective=True):
-  if no_objective:
-    return [create_subsystem_from_constr_list_no_obj(i, constr_map) for i in constr_lists]
-  return [create_subsystem_from_constr_list(i, constr_map) for i in constr_lists]
-
-def solve_subsystems_sequential(subsystems, folder):
-  solver_success = [True]*len(subsystems)
-  for idx, model in enumerate(subsystems):
-    solver_success[idx] = solve_subsystem(model, folder, idx)
+def solve_subsystems_sequential(model, subsystem_names, folder, solver="ipopt"):
+  assert solver == "ipopt" or solver == "conopt"
+  solver_success = [True]*len(subsystem_names)
+  for idx, name in enumerate(subsystem_names):
+    print(f"solving {name}")
+    solver_success[idx] = solve_subsystem(model.find_component(name), folder, solver, idx)
   return solver_success
 
-def solve_subsystem(subsystem, folder, id):
+def solve_subsystem(subsystem, folder, solver, idx):
+    assert solver == "ipopt" or solver == "conopt"
+    if solver == "ipopt":
+      return solve_subsystem_ipopt(subsystem, folder, idx)
+    if solver == "conopt":
+      return solve_subsystem_conopt(subsystem, folder, idx)
+
+
+def solve_subsystem_conopt(subsystem, folder, id):
+  # subsystem.pprint()
+  solver =  pyo.SolverFactory('gams')
+  opts = {}
+  opts["solver"] = "conopt"
+  opts['add_options'] = ["Option IterLim=1000;"]
+  try:
+    # 1000 iterations for conopt
+    results = solver.solve(subsystem, keepfiles=True, io_options=opts, 
+      tmpdir= "/.nfs/home/strahlw/GAMS/pyomoTmp/conopt",
+      logfile=os.path.join(folder,"block_{}_logfile_conopt.log".format(id)))
+    if not check_optimal_termination(results) and not results.solver.termination_condition == TerminationCondition.feasible:
+      return False
+  except Exception as e:
+    print("Solver ERROR")
+    print(e)
+    return False
+  return True
+
+def solve_subsystem_ipopt(subsystem, folder, id):
+  from pyomo.common.tempfiles import TempfileManager
+  TempfileManager.tempdir = "/.nfs/home/strahlw/GAMS/pyomoTmp/ipopt"
   solver = pyo.SolverFactory('ipopt')
-  # try:
-  solver.options['max_iter'] = 300
-  solver.solve(subsystem, logfile=os.path.join(folder,"block_{}_logfile.log".format(id)))
-  # except:
-  #   print("Solver ERROR")
-  #   return False
+  solver.options['OF_mu_init'] = 0.0001
+  solver.options['OF_bound_push'] = 1e-10
+  solver.options['OF_bound_frac'] = 1e-10
+  solver.options['OF_max_iter'] = 300
+  try:
+    results = solver.solve(subsystem, logfile=os.path.join(folder,"block_{}_logfile_ipopt.log".format(id)))
+    if not check_optimal_termination(results) and not results.solver.termination_condition == TerminationCondition.maxIterations:
+      return False
+  except Exception as e:
+    print("Solver ERROR")
+    print(e)
+    return False
   return True
 
 
@@ -324,17 +387,20 @@ def uniform_random_heuristic(var):
     return var.lb + perturbation 
   assert False
 
-def get_initial_values_guesses(model, incidenceGraph):
+def get_original_bounds(model, incidenceGraph):
   initial_bounds = ComponentMap()
   for var in incidenceGraph.variables:
     initial_bounds[var] = var.bounds
-  fbbt(model, feasibility_tol = 1e-4)
+  return initial_bounds
+
+def execute_fbbt(model):
+  fbbt(model, feasibility_tol = 1e-4, max_iter = 100, improvement_tol = 1e-2)
+  
+def get_initial_values_guesses(model, incidenceGraph):
   initial_vals = ComponentMap()
   for var in incidenceGraph.variables:
     initial_val = uniform_random_heuristic(var)
     initial_vals[var] = initial_val
-  for var in incidenceGraph.variables:
-    var.bounds = initial_bounds[var]
   return initial_vals
 
 def create_subfolder(folder_name):
@@ -374,7 +440,7 @@ def convert_constr_to_residual_form(constraint):
 def create_residual_objective_expression(list_constraints):
   return sum(convert_constr_to_residual_form(constr)**2 for constr in list_constraints)
   
-def phase_I(complicating_variables, simple_variables, subsystems, folder, iteration):
+def phase_I(model, complicating_variables, simple_variables, subsystem_names, folder, iteration, solver):
   # assume all the variables are unfixed
   unfix_variables(simple_variables)
   assert all(i.fixed == False for i in complicating_variables)
@@ -383,7 +449,7 @@ def phase_I(complicating_variables, simple_variables, subsystems, folder, iterat
   create_subfolder(folder)
   fix_variables(complicating_variables)
   # solve the subsystems and keep track of solver status
-  return solve_subsystems_sequential(subsystems, folder)
+  return solve_subsystems_sequential(model, subsystem_names, folder, solver)
 
 def get_normalized_change_var(old_val, new_val):
   if old_val == new_val:
@@ -393,130 +459,335 @@ def get_normalized_change_var(old_val, new_val):
   # measures the normalized change of each variable
   return abs(new_val - old_val) / abs(old_val)
 
+def get_initial_values_default(model, igraph):
+  initial_vals = ComponentMap()
+  for var in igraph.variables:
+    if var.value == None:
+      initial_vals[var] = 0
+    else:
+      initial_vals[var] = var.value
+  return initial_vals
+
 def get_list_normalized_change(list_vars, list_old):
   return [get_normalized_change_var(list_old[list_vars[i]], list_vars[i].value) for i in range(len(list_old))]
 
-def phase_II(complicating_constr_subsystem, complicating_vars, complicating_constr, simple_vars, folder):
+def phase_II(model, complicating_constr_subsystem_name, complicating_vars, complicating_constr, simple_vars, folder, solver, iteration):
   # unfix the complicating variables
   unfix_variables(complicating_vars)
   fix_variables(simple_vars)
-  return solve_subsystem(complicating_constr_subsystem, folder, "complicating_constr")
+  print(f"solving {complicating_constr_subsystem_name}")
+  name = complicating_constr_subsystem_name
+  print("Number active constraints = ", 
+  len([constr for constr in model.find_component(name).component_data_objects(pyo.Constraint) if constr.active]))
+  print("Number of unfixed vars = ",
+  len([var for var in model.find_component(name).component_data_objects(pyo.Var) if not var.fixed]))
+  return solve_subsystem(model.find_component(complicating_constr_subsystem_name), folder, solver, f"complicating_constr_{iteration}")
 
-def initialization_strategy(model, folder, method=2, num_part=4, fraction=0.5, matched=False, d_max=1, n_max=2):
+def initialize_old_vals(variables):
+  old_vals = ComponentMap()
+  for var in variables:
+    if var.value == None:
+      old_vals[var] = 0
+    else:
+      old_vals[var] = var.value
+  return old_vals
+
+def reset_bounds(variables, initial_bounds):
+  for var in variables:
+    var.bounds = initial_bounds[var]
+
+def strip_bounds(variables):
+  # remove bounds on all the variables
+  for var in variables:
+    var.setlb(None)
+    var.setub(None)
+
+def deactivate_constraints(model):
+  for constr in model.component_data_objects(pyo.Constraint):
+    constr.deactivate()
+
+def activate_constraints(model):
+  for constr in model.component_data_objects(pyo.Constraint):
+    constr.activate()
+
+def initialization_strategy(model, folder, method=2, num_part=4, fraction=0.5, 
+  matched=False, d_max=1, n_max=2, solver="ipopt", use_init_heur="True", use_fbbt="True",
+  max_iteration=100, algo_configuration=algorithmConfiguration()):
+  # the solver option default is a warm-start or an initial point
+  # this provides a heuristic to give the solvers a starting point
+  #assert use_init_heur == True 
+
   create_subfolder(folder)
   folder = os.path.join(folder, "Results")
   create_subfolder(folder)
   igraph, incidence_matrix = get_incidence_matrix(model)
+  list_variables = igraph.variables
+  list_constraints = igraph.constraints
+
+  # for var in list_variables:
+  #   if var.lb != None and var.lb > 0 and var.lb < 1e-10:
+  #     # print("lb is ", var.lb)
+  #     # print("var name is ", var.name)
+  #     var.setlb(1e-10)
+  # sys.exit(0)
+
+  initial_bounds = get_original_bounds(model, igraph)
+  if use_init_heur:
+    if use_fbbt:
+      execute_fbbt(model)
+    initial_vals = get_initial_values_guesses(model, igraph)
+    for var in igraph.variables:
+      var.value = initial_vals[var]
+  else:
+    initial_vals = get_initial_values_default(model, igraph)
+  
+  old_vals = initialize_old_vals(list_variables)
+
+  if solver == "ipopt":
+    reset_bounds(list_variables, initial_bounds)
+  
+  strip_bounds(list_variables)
+  for var in list_variables:
+    if var.lb == 0:
+      # set small tolerance
+      var.setlb(1e-15)
   col_order, row_order, blocks, idx_var_map, idx_constr_map = \
     get_restructured_matrix_general(incidence_matrix, igraph, model, folder, method, fraction, num_part, matched, 
       d_max, n_max)
   constr_list = [i[1] for i in blocks]
   complicating_constr = get_list_of_complicating_constraints(blocks, idx_constr_map)
-  subsystems = create_subsystems(constr_list, idx_constr_map, no_objective=True)
-  complicating_constr_subsystem = create_subsystem_from_constr_list_no_obj(
-    get_list_complicating_constraint_indices(blocks, idx_constr_map), idx_constr_map)
-  complicating_constr_subsystem.obj = pyo.Objective(expr = create_residual_objective_expression([idx_constr_map[i] for i in idx_constr_map]))
-  # # deactivate the linking constraints, this will not affect the system solves
-  # for constr in complicating_constr_subsystem.component_objects(pyo.Constraint):
-  #   constr.deactivate()
+  complicating_constr_idxs = get_list_complicating_constraint_indices(blocks, idx_constr_map)
   complicating_vars = get_list_of_complicating_variables(blocks, idx_var_map)
   simple_vars = get_list_of_simple_variables(blocks, idx_var_map)
-  initial_vals = get_initial_values_guesses(model, igraph)
-  old_vals = ComponentMap()
-  for var in initial_vals:
-    # var.value = initial_vals[var]
-    old_vals[var] = initial_vals[var]
+  complicating_constr_subsystem_name = "complicating constraints"
+
+  # algorithmic configurations
+  phase_I_objective = algo_configuration.phase_I["subproblem_objective"]
+  phase_II_objective = algo_configuration.phase_II["subproblem_objective"]
+  phase_II_objective_constraints = algo_configuration.phase_II["constraints"]
+  deactivate_constraints_phase_II = False
+  deactivate_constraints_phase_I = False
+
+  if phase_I_objective == 0:
+    print("option A")
+    subsystems = create_subsystems(model, constr_list, idx_constr_map, no_objective=True)
+  if phase_I_objective == 1:
+    print("option B")
+    subsystems = create_subsystems(model, constr_list, idx_constr_map, no_objective=False)
+    deactivate_constraints_phase_I = True
+
+  if phase_II_objective == 0:
+    print("Option B.5")
+    assert phase_II_objective_constraints == 0 # don't want to solve the whole problem
+    create_subsystem_from_constr_list_no_obj(model, complicating_constr_idxs, idx_constr_map,
+      complicating_constr_subsystem_name)
+
+
+  if phase_II_objective == 1 and phase_II_objective_constraints == 0:
+    print("option C")
+    # minimizing the sum of squared residuals of the linking constraints
+    create_subsystem_from_constr_list(model, complicating_constr_idxs, idx_constr_map,
+      complicating_constr_subsystem_name)
+    deactivate_constraints_phase_II = True
+  if phase_II_objective == 1 and phase_II_objective_constraints == 1:
+    print("option D")
+    # more complicated, we want to minimize the residual of the entire problem in the 
+    # final subproblem, but we need to reactivate constraints for the subsystem solve
+    create_subsystem_from_constr_list_no_obj(model,
+      [i for i in idx_constr_map], idx_constr_map,
+      complicating_constr_subsystem_name)
+    deactivate_constraints_phase_II = True
+    model.find_component(complicating_constr_subsystem_name).del_component("obj")
+    # scale the sum of squares, should not affect the optimization
+    model.find_component(complicating_constr_subsystem_name).add_component("obj",
+    # pyo.Objective(expr = create_residual_objective_expression([idx_constr_map[i] for i in idx_constr_map])))
+    #pyo.Objective(expr = create_residual_objective_expression(complicating_constr)))
+    pyo.Objective(expr = 1/1e10 * create_residual_objective_expression(complicating_constr)))
   
+  print("Configuration = ", algo_configuration.config)
+  print("Subsystem_objectives = ") 
+  model.find_component(subsystems[0]).obj.pprint()
+  print("Number active constraints = ", 
+    len([constr for constr in model.find_component(subsystems[0]).component_data_objects(pyo.Constraint) if constr.active]))
+  print("Complicating constraints objective  = ") 
+  model.find_component(complicating_constr_subsystem_name).obj.pprint()
+  print("Number active constraints = ", 
+    len([constr for constr in model.find_component(complicating_constr_subsystem_name).component_data_objects(pyo.Constraint) if constr.active]))
+  # data collection
+  data_maximum_change = [0]
+  # data_maximum_change_var = ["None"]
+  data_sum_violation = []
+  data_subsystem_success = ["None"]
+
+
+  init_sum_violation = sum(get_constraint_violation(constr) for constr in list_constraints)
+  print("initial sum of violation = ", init_sum_violation)
+  data_sum_violation.append(init_sum_violation)
+
+
   iteration = 0
   maximum_change = 1
+
   while True:
-    if iteration >= 5:
+    iteration += 1
+    if iteration > max_iteration:
       print("Reached maximum iteration limit")
       break
-    if iteration >= 1:
-      print("Iteration = ", iteration)
-      #print(get_list_normalized_change([var for var in initial_vals], old_vals))
-      maximum_change = max(get_list_normalized_change([var for var in initial_vals], old_vals))
-      
-      print("Maximum change = ", maximum_change)
                            
     tolerance = 1e-2 # change by 1%
     for var in initial_vals:
-      old_vals[var] = float(var.value)
+      if var.value == None:
+        old_vals[var] = 0
+      else:
+        old_vals[var] = float(var.value)
     if maximum_change < tolerance:
       break
 
-    phase_I(complicating_vars, simple_vars, subsystems, folder, iteration)
-    #TODO handle unsuccessful solves - what do we do? start at point of 
-    # local infeasibility?
-    # print("Vals after Phase I")
-    # for var in initial_vals:
-    #   print(var, var.value)
+    subsystem_success = [True]
+    activate_constraints(model)
+    if algo_configuration.phase_I["nonlinear_program"] == 1:
+      if deactivate_constraints_phase_I:
+        deactivate_constraints(model)
+      subsystem_success = phase_I(model, complicating_vars, simple_vars, subsystems, folder, iteration, solver)
 
-    phase_II(complicating_constr_subsystem, complicating_vars, complicating_constr, simple_vars, folder)
-    # print("Vals after Phase II")
-    # for var in initial_vals:
-    #   print(var, var.value)
+    activate_constraints(model)
+    if algo_configuration.phase_II["nonlinear_program"] == 1:
+      if deactivate_constraints_phase_II:
+        deactivate_constraints(model)
+      subsystem_success.append(phase_II(model, complicating_constr_subsystem_name, complicating_vars, complicating_constr, simple_vars, folder, solver, iteration))
+    # reactivate the constraints
+      # if deactivate_constraints_phase_II:
+      #   activate_constraints(model)
     
-    iteration += 1
+    if iteration >= 1:
+      print("Iteration = ", iteration)
+      sum_violation = sum(get_constraint_violation(constr) for constr in list_constraints)
+      print("Maximum change = ", maximum_change)
+      print("sum of violation = ", sum_violation)
+      #print(get_list_normalized_change([var for var in initial_vals], old_vals))
+      maximum_change = max(get_list_normalized_change([var for var in initial_vals], old_vals))
+      data_maximum_change.append(maximum_change)
+      data_sum_violation.append(sum_violation)
+      data_subsystem_success.append({i: subsystem_success[i] for i in range(len(subsystem_success))})
   # for subsystem in subsystems:
   #   subsystem.pprint()
   # sys.exit(0)
-  print("number of iterations = ", iteration)
-  print("final max change = ", maximum_change)
-  unfix_variables(simple_vars)
+  # sum_violation = sum(get_constraint_violation(constr) for constr in list_constraints)
+  # print("number of iterations = ", iteration)
+  # print("final max change = ", maximum_change)
+  # print("final sum of violation = ", sum_violation)
+  # unfix_variables(simple_vars)
+  # data_maximum_change.append(maximum_change)
+  # data_sum_violation.append(sum_violation)
+  # data_subsystem_success.append({i: subsystem_success[i] for i in range(len(subsystem_success))})
+  # for a final solve
   for idx in idx_constr_map:
     idx_constr_map[idx].activate()
-  # print("final_vals")
-  # for var in initial_vals:
-  #   print(var, var.value)
+  for block in model.component_data_objects(pyo.Block):
+    block.del_component(block.find_component("obj"))
+  #model.obj = pyo.Objective(expr=0)
+  unfix_variables(simple_vars)
+  unfix_variables(complicating_vars)
 
-  # iteration = 1
-  # print(phase_I(complicating_vars, simple_vars, subsystems, folder, iteration))
-  # #TODO - handle unsuccessful solves
-  # print("Vals after Phase I")
-  # for var in initial_vals:
-  #   print(var, var.value)
+  with open(os.path.join(folder, "Results.txt"), 'w') as file:
+    for i in range(len(data_maximum_change)):
+      file.write(f"Iteration : {i}\n")
+      file.write(f"maximum change : {data_maximum_change[i]}\n")
+      file.write(f"sum violation : {data_sum_violation[i]}\n")
+      if i > 0:
+        file.write(f"difference violation : {data_sum_violation[i] - data_sum_violation[i-1]}\n")
+        for j in range(len(data_subsystem_success[i])):
+          if j == len(data_subsystem_success[i]) - 1:
+            file.write(f"Complicating constraint subsystem : {data_subsystem_success[i][j]}\n")
+          else:
+            file.write(f"Subsystem {j} : {data_subsystem_success[i][j]}\n")
+      file.write("\n")
 
-  # phase_II(complicating_constr_subsystem, complicating_vars, complicating_constr, simple_vars, folder)
-  # print("Vals after Phase II")
-  # for var in initial_vals:
-  #   print(var, var.value)
+def get_closer_initial_point(list_constraints, list_variables, alpha, beta, iter_lim):
+  iteration = 0
+  fv_consensus, distances, s = constraint_consensus(list_constraints, list_variables, alpha)
+  current_violation = sum(get_constraint_violation(constr) for constr in list_constraints)
+  print("initial_violation = ", current_violation)
+  while True:
+    if sum(s) == 0:
+      print("Exited on feasibility vector distance tolerance or on feasibility - alpha")
+      return
+    if norm_l2(fv_consensus) < beta:
+      print("Exited on length of move, beta")
+      return
+    if iteration >= iter_lim:
+      print("Reached maximum # of iterations")
+      return
+    for i in range(len(list_variables)):
+      list_variables[i].value = adjust_consensus_value(list_variables[i].value + fv_consensus[i], list_variables[i].lb, list_variables[i].ub)
+    iteration_violation = sum(get_constraint_violation(constr) for constr in list_constraints)
+    if abs(current_violation - iteration_violation)/current_violation < 1e-2:
+      print("Change is less than 1 percent of violation - terminate")
+      return 
+    current_violation = iteration_violation
+    print("iteration : {}".format(iteration))
+    print("violation = ", current_violation) 
+    iteration += 1
+    fv_consensus, distances, s = constraint_consensus(list_constraints, list_variables, alpha)
+    
+  return 
 
-  # iteration = 2
-  # print(phase_I(complicating_vars, simple_vars, subsystems, folder, iteration))
-  # # until termination criteria - just do one iteration for now
-  # #phase_II(complicating_constr_subsystem, complicating_vars)
-  # print("Vals after Phase I iteration 2")
-  # for var in initial_vals:
-  #   print(var, var.value)
+def constraint_consensus(list_of_constraints, list_of_variables, alpha):
+  # keeps track of how many contribute component-wise
+  # s_var = {i : 0 for i in range(len(vars))}
+  grad_constr = list(np.array(get_constraint_gradient_all_vars(constr, list_of_variables)) for constr in list_of_constraints)
+  
+  norm_grad_constr = list(norm_l2(grad_c) for grad_c in grad_constr)
+  # remove any constraint with 0 norm
+  idx_to_remove = list(i for i in range(len(norm_grad_constr)) if norm_grad_constr[i]==0)
+  adjust = 0
+  for idx in idx_to_remove:
+    del norm_grad_constr[idx-adjust]
+    del list_of_constraints[idx-adjust]
+    del grad_constr[idx-adjust]
+    adjust += 1
+  # filter out by distance
+  v = np.array(list(get_constraint_violation(constr) for constr in list_of_constraints))
+  distances = list(v[i] / norm_grad_constr[i] for i in range(len(norm_grad_constr)))
 
-  # phase_II(complicating_constr_subsystem, complicating_vars, complicating_constr, simple_vars, folder)
-  # print("Vals after Phase II iteration 2")
-  # for var in initial_vals:
-  #   print(var, var.value)
+  # eliminate any contributions of feasibility vectors that don't have a sufficient feasibility distance
+  v = np.array([v[i] if distances[i] >= alpha else 0 for i in range(len(v))])
+  d = np.array(list(determine_d_constr(constr) for constr in list_of_constraints))
+  squared_norm_grad_constr = np.array(list(i**2 for i in norm_grad_constr))
+  # s is indexed by variable
+  s = list(sum(1 if grad_constr[j][i] != 0 and v[j] != 0 else 0 for j in range(len(grad_constr)))
+           for i in range(len(list_of_variables)))
+  # fv = feasibility_vector, checked all divide by zeros
+  multiplier = d*v/squared_norm_grad_constr
+  fv_list = list(multiplier[i]*grad_constr[i] for i in range(len(multiplier)))  # indexed by variable
+  fv_consensus = np.sum(fv_list, axis=0)
+  fv_consensus = list(fv_consensus[i]/s[i] if s[i] != 0 else 0 for i in range(len(s)))
+  return fv_consensus, distances, s
 
+def determine_d_constr(constraint):
+  assert constraint.equality
+  return 1 if pyo.value(constraint.body) < constraint.upper else -1
 
-# m = pyo.ConcreteModel()
-# m.x1 = pyo.Var(name="x1", bounds=(0,1))
-# m.x2 = pyo.Var(name="x2", bounds=(0,1))
-# m.x3 = pyo.Var(name="x3", bounds=(0,1))
-# m.x4 = pyo.Var(name="x4", bounds=(0,1))
-# m.x5 = pyo.Var(name="x5", bounds=(0,1))
-# m.x6 = pyo.Var(name="x6", bounds=(0,1))
+def get_constraint_gradient(constraint):
+  return differentiate(constraint.body, wrt_list=list(identify_variables(constraint.body)))
 
-# m.cons1 = pyo.Constraint(expr=m.x2 + m.x4  == 1.5 - m.x5)
-# m.cons2 = pyo.Constraint(expr=m.x1 + m.x3 == 1)
-# m.cons3 = pyo.Constraint(expr=m.x3 == 0.5)
-# m.cons4 = pyo.Constraint(expr=m.x2 == 0.5)
-# m.cons5 = pyo.Constraint(expr=m.x1 + m.x3 == 1.5 - m.x5)
-# m.cons6 = pyo.Constraint(expr=m.x2 + m.x4 + m.x6 == 1.5)
+def get_constraint_gradient_all_vars(constraint, all_vars):
+  return differentiate(constraint.body, wrt_list=all_vars)
 
-# initialization_strategy(m, method=1, num_part=2, fraction=0.6, matched=True, d_max=1, n_max=2)
-# sys.exit(0)
+def norm_l2(vector):
+  return math.sqrt(sum(i**2 for i in vector))
 
+def get_constraint_violation(constraint):
+  return abs(pyo.value(constraint.body) - constraint.upper)
 
-
+def adjust_consensus_value(val, lb, ub):
+  if ub == None and lb == None:
+    return val
+  if lb == None:
+    return min(val, ub)
+  if ub == None:
+    return max(lb, val)
+  return max(lb, min(val, ub))
 
 
 
