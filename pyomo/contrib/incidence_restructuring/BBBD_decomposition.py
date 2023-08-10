@@ -472,7 +472,13 @@ class BBBD_algo(object):
         self.m = m
         self.n = n
         self.edge_list = edge_list
-        self.fraction = fraction
+        # this fraction will terminate the algorithm if a block that will be created is 
+        # this fraction of the original matrix size
+        # set to a value > 1, the algorithm will never terminate on this criteria
+        self.fraction = 5
+        # this fraction will terminate the algorithm if the border becomes smaller than 
+        # this fraction of the original problem size
+        self.border_fraction = fraction
         self.variables = [VarVertex(i) for i in range(n)]
         self.constraints = [ConstrVertex(j) for j in range(m)]
         self.sorting_structure = SortingStructure(self.n, self.fraction)
@@ -508,7 +514,9 @@ class BBBD_algo(object):
         self.border_vars_no_constr = {}
 
         # for termination
-        self.border_size = n
+        # start with the border size being the minimum of n, m
+        # will add one pair at a time, this will ensure there is always a pair
+        self.border_size = min(n, m)
         self.num_border_vars = 0
         self.num_sys_vars = 0
         self.terminate = False
@@ -893,7 +901,8 @@ class BBBD_algo(object):
         return self.get_column_row_order_blocks()
 
     def termination_criteria(self):
-        if self.border_size == 0:
+        # terminate if the border becomes smaller than a specified threshold
+        if self.border_size <= self.border_fraction*self.n:
             if self.print_data:
                 print("Terminate on border size")
             # terminate if border goes to 0
@@ -934,12 +943,12 @@ class BBBD_algo(object):
 # import sys
 
 
-# def create_matrix(seed):
+# def create_matrix(seed, size, fill):
 #     random.seed(seed)
-#     size_matrix = 10
+#     size_matrix = size
 #     size_matrix_m = size_matrix
 #     size_matrix_n = size_matrix
-#     fill_matrix = 60 # maximum possible fill per row before adding diagonal
+#     fill_matrix = fill # maximum possible fill per row before adding diagonal
 #     original_matrix = np.zeros((size_matrix, size_matrix))
 #     for i in range(size_matrix):
 #         # for each row select a number of indices to make nonzero
@@ -981,36 +990,48 @@ class BBBD_algo(object):
 #                 edges.append((i,j))
 #     return edges 
 
-# # # original_matrix = np.array([[0,0],[0,0]])
-# # # print(original_matrix)
-# # # show_matrix_structure(original_matrix)
+# # original_matrix = np.array([[0,0],[0,0]])
+# # print(original_matrix)
+# # show_matrix_structure(original_matrix)
 
 
 # seeds = range(100)
 # failed = []
+# size = 20
+# fraction = 0.3
+# fill = 40
 # for i in seeds:
 #     print("Instance ", i)
-#     original_matrix = create_matrix(i)
-#     test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), 0.3)
+#     original_matrix = create_matrix(i,size,fill)
+#     test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), fraction)
 #     # try:
 #     col_order, row_order, blocks = test.solve()
+#     print("Specified fraction = ", fraction)
+#     print("Actual fraction = ", (size - sum(len(blocks[i][0]) for i in range(len(blocks))))/size)
+
         # print(max(test.blocks[i].size for i in test.blocks))
         # print([test.blocks[i].size for i in test.blocks])
 # reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
 #     len(col_order), row_order, col_order, original_matrix)
-    # except:
-    #     failed.append(i)
+#     except:
+#         failed.append(i)
 
-#failed = [8]
-# original_matrix = create_matrix(29)
+# failed = [8]
+# size = 100 
+# fill = 6
+# seed = 29
+# fraction = 0.1
+# original_matrix = create_matrix(seed, size, fill)
 # print(original_matrix)
 # show_matrix_structure(original_matrix)
-# test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), 0.5)
+# test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), fraction)
 # col_order, row_order, blocks = test.solve()
 # reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
 #     len(col_order), row_order, col_order, original_matrix)
 # print(col_order, row_order, blocks)
 # show_matrix_structure(reordered_incidence_matrix)
+# print("Specified fraction = ", fraction)
+# print("Actual fraction = ", (size - sum(len(blocks[i][0]) for i in range(len(blocks))))/size)
 # print(failed)
 
 # edges = [(0,1),(0,3), (1,0), (1,2), (2,2), (3,1)]
