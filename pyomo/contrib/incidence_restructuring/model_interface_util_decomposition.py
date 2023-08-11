@@ -10,7 +10,7 @@ from pyomo.contrib.incidence_restructuring.BBBD_algorithm import bbbd_algo
 from pyomo.common.collections import ComponentMap
 from pyomo.util.subsystems import create_subsystem_block
 from pyomo.contrib.fbbt.fbbt import fbbt
-from pyomo.opt.results.solver import check_optimal_termination, TerminationCondition
+from pyomo.opt.results.solver import check_optimal_termination, TerminationCondition, SolverStatus
 # comp,
 #     deactivate_satisfied_constraints=False,
 #     integer_tol=1e-5,
@@ -339,8 +339,13 @@ def solve_subsystem_conopt(subsystem, folder, id):
     results = solver.solve(subsystem, keepfiles=True, io_options=opts, 
       tmpdir= "/.nfs/home/strahlw/GAMS/pyomoTmp/conopt",
       logfile=os.path.join(folder,"block_{}_logfile_conopt.log".format(id)))
-    if not check_optimal_termination(results) and not results.solver.termination_condition == TerminationCondition.feasible:
+    if results.solver.status == SolverStatus.error:
       return False
+    if results.solver.status == SolverStatus.warning:
+      if results.solver.termination_condition != TerminationCondition.infeasible and \
+         results.solver.termination_condition != TerminationCondition.feasible and \
+         results.solver.termination_condition != TerminationCondition.maxIterations:
+         return False
   except Exception as e:
     print("Solver ERROR")
     print(e)
@@ -348,17 +353,22 @@ def solve_subsystem_conopt(subsystem, folder, id):
   return True
 
 def solve_subsystem_ipopt(subsystem, folder, id):
-  from pyomo.common.tempfiles import TempfileManager
-  TempfileManager.tempdir = "/.nfs/home/strahlw/GAMS/pyomoTmp/ipopt"
+  # from pyomo.common.tempfiles import TempfileManager
+  # TempfileManager.tempdir = "/.nfs/home/strahlw/GAMS/pyomoTmp/ipopt"
   solver = pyo.SolverFactory('ipopt')
-  solver.options['OF_mu_init'] = 0.0001
-  solver.options['OF_bound_push'] = 1e-10
-  solver.options['OF_bound_frac'] = 1e-10
+  # solver.options['OF_mu_init'] = 0.0001
+  # solver.options['OF_bound_push'] = 1e-10
+  # solver.options['OF_bound_frac'] = 1e-10
   solver.options['OF_max_iter'] = 300
   try:
     results = solver.solve(subsystem, logfile=os.path.join(folder,"block_{}_logfile_ipopt.log".format(id)))
-    if not check_optimal_termination(results) and not results.solver.termination_condition == TerminationCondition.maxIterations:
+    if results.solver.status == SolverStatus.error:
       return False
+    if results.solver.status == SolverStatus.warning:
+      if results.solver.termination_condition != TerminationCondition.infeasible and \
+         results.solver.termination_condition != TerminationCondition.feasible and \
+         results.solver.termination_condition != TerminationCondition.maxIterations:
+         return False
   except Exception as e:
     print("Solver ERROR")
     print(e)
@@ -512,11 +522,15 @@ def activate_constraints(model):
 
 def initialization_strategy(model, folder, method=2, num_part=4, fraction=0.5, 
   matched=False, d_max=1, n_max=2, solver="ipopt", use_init_heur="True", use_fbbt="True",
-  max_iteration=100, border_fraction=0.5, algo_configuration=algorithmConfiguration()):
+  max_iteration=100, border_fraction=0.5, algo_configuration=algorithmConfiguration(), test=0,
+  strip_model_bounds=False):
   # the solver option default is a warm-start or an initial point
   # this provides a heuristic to give the solvers a starting point
   #assert use_init_heur == True 
-
+  final_folder = "FinalResultsRuns"
+  if not os.path.exists(final_folder):
+    os.mkdir(final_folder)
+  first_folder = folder
   create_subfolder(folder)
   folder = os.path.join(folder, "Results")
   create_subfolder(folder)
@@ -546,7 +560,8 @@ def initialization_strategy(model, folder, method=2, num_part=4, fraction=0.5,
   if solver == "ipopt":
     reset_bounds(list_variables, initial_bounds)
   
-  strip_bounds(list_variables)
+  if strip_model_bounds:
+    strip_bounds(list_variables)
   for var in list_variables:
     if var.lb == 0:
       # set small tolerance
@@ -702,6 +717,54 @@ def initialization_strategy(model, folder, method=2, num_part=4, fraction=0.5,
           else:
             file.write(f"Subsystem {j} : {data_subsystem_success[i][j]}\n")
       file.write("\n")
+  
+  # write the final results file with all the pertinent information for data visualization
+  with open(os.path.join(final_folder, first_folder + ".txt"), 'w') as file:
+    # information needed - all the parameters :
+    # restructuring algorithm type
+    file.write(f"method : {method}\n")
+    # matched
+    file.write("matched : {}\n".format(1 if method else 0))
+    # restructuring algorithm parameters
+    file.write(f"d_max : {d_max}\n")
+    file.write(f"n_max : {n_max}\n")
+    file.write(f"border_fraction : {border_fraction}\n")
+    file.write(f"fraction : {fraction}\n")
+    file.write(f"num_part : {num_part}\n")
+    # size of the border - for now assume square
+    size_border = len(complicating_constr)
+    file.write(f"size_border : {size_border}\n")
+    # number of blocks
+    num_blocks = len(blocks)
+    file.write(f"num_blocks : {num_blocks}\n")
+    # size largest block
+    largest_block = max(len(blocks[i][0]) for i in range(len(blocks)))
+    file.write(f"largest_block : {largest_block}\n") 
+    # final infeasibility
+    sum_violation = sum(get_constraint_violation(constr) for constr in list_constraints)
+    file.write(f"initial_infeasibility : {init_sum_violation}\n")
+    file.write(f"final_infeasibility : {sum_violation}\n")
+    # subproblem failures
+    failure = 0
+    for i in range(len(data_subsystem_success)):
+      for j in range(len(data_subsystem_success[i])):
+        if not data_subsystem_success[i][j]:
+          failure += 1
+    file.write(f"subproblem_failures : {failure}\n")
+    # algorithm configuration
+    file.write(f"algo_configuration : {algo_configuration.config}\n")
+    # initial point strategy
+    use_init_heur_str = "0" if not use_init_heur else "1"
+    use_fbbt_str = "0" if not use_fbbt else "1"
+    strip_bounds_str = "0" if not strip_model_bounds else "1"
+    file.write(f"initialization_strategy : {use_init_heur_str}{use_fbbt_str}{strip_bounds_str}\n")
+    # number of iterations
+    file.write(f"iterations : {iteration-1}\n")
+    # which solver
+    file.write(f"solver : {solver}\n")
+    # which test
+    file.write(f"test : {test}\n")
+
 
 def get_closer_initial_point(list_constraints, list_variables, alpha, beta, iter_lim):
   iteration = 0
