@@ -37,6 +37,7 @@ class algorithmConfiguration(object):
     # constraints 1 -> all the constraints (only applicable to minimizing violations)
     self.phase_II = {"subproblem_objective" : 0, "constraints" : 0, "nonlinear_program" : 1}
     self.config = 1
+    self.constraint_consensus = False
 
   def set_configuration(self, config):
     self.config = config
@@ -44,12 +45,15 @@ class algorithmConfiguration(object):
     # config 2 - systems minimize squared violations
     # config 3 - complicating constraint objective is minimizing squared violations
     # config 4 - both problems' objectives are minimizing squared violations
-    if config in [2,4,6]:
+    if config in [2,4,6,8]:
       self.phase_I["subproblem_objective"] = 1
     if config in [3,4,5,6]:
       self.phase_II["subproblem_objective"] = 1
     if config in [5,6]:
       self.phase_II["constraints"] = 1
+    if config in [7,8]:
+      self.constraint_consensus = True
+      self.phase_II["nonlinear_program"] = False
     return
   
 ###############
@@ -318,10 +322,12 @@ def solve_subsystems_sequential(model, subsystem_names, folder, solver="ipopt"):
   for idx, name in enumerate(subsystem_names):
     print(f"solving {name}")
     solver_success[idx] = solve_subsystem(model.find_component(name), folder, solver, idx)
+
   return solver_success
 
 def solve_subsystem(subsystem, folder, solver, idx):
     assert solver == "ipopt" or solver == "conopt"
+    subsystem.pprint()
     if solver == "ipopt":
       return solve_subsystem_ipopt(subsystem, folder, idx)
     if solver == "conopt":
@@ -330,14 +336,16 @@ def solve_subsystem(subsystem, folder, solver, idx):
 
 def solve_subsystem_conopt(subsystem, folder, id):
   # subsystem.pprint()
+  from pyomo.common.tempfiles import TempfileManager
+  TempfileManager.tempdir = "/.nfs/home/strahlw/GAMS/pyomoTmp/conopt"
   solver =  pyo.SolverFactory('gams')
   opts = {}
   opts["solver"] = "conopt"
-  opts['add_options'] = ["Option IterLim=1000;"]
+  opts['add_options'] = ["Option IterLim=1000;"]#, "GAMS_MODEL.optfile = 1;"]
   try:
     # 1000 iterations for conopt
-    results = solver.solve(subsystem, keepfiles=True, io_options=opts, 
-      tmpdir= "/.nfs/home/strahlw/GAMS/pyomoTmp/conopt",
+    results = solver.solve(subsystem, io_options=opts, 
+      tmpdir= "/.nfs/home/strahlw/GAMS/pyomoTmp/conopt", keepfiles=True,
       logfile=os.path.join(folder,"block_{}_logfile_conopt.log".format(id)))
     if results.solver.status == SolverStatus.error:
       return False
@@ -359,7 +367,9 @@ def solve_subsystem_ipopt(subsystem, folder, id):
   # solver.options['OF_mu_init'] = 0.0001
   # solver.options['OF_bound_push'] = 1e-10
   # solver.options['OF_bound_frac'] = 1e-10
+  # solver.options['OF_bound_relax_factor'] = 0
   solver.options['OF_max_iter'] = 300
+  # solver.options['OF_halt_on_ampl_error'] = 'yes'
   try:
     results = solver.solve(subsystem, logfile=os.path.join(folder,"block_{}_logfile_ipopt.log".format(id)))
     if results.solver.status == SolverStatus.error:
@@ -473,24 +483,32 @@ def get_initial_values_default(model, igraph):
   initial_vals = ComponentMap()
   for var in igraph.variables:
     if var.value == None:
+      # maybe change this to 1?
       initial_vals[var] = 0
     else:
       initial_vals[var] = var.value
   return initial_vals
 
 def get_list_normalized_change(list_vars, list_old):
-  return [get_normalized_change_var(list_old[list_vars[i]], list_vars[i].value) for i in range(len(list_old))]
+  to_return = []
+  for i in range(len(list_vars)):
+    normalized_change = get_normalized_change_var(list_old[list_vars[i]], list_vars[i].value)
+    if normalized_change > 1 and abs(list_vars[i].value) > 1:
+      print("Name = ", list_vars[i].name)
+      print("Old value = ", list_old[list_vars[i]])
+      print("New value = ", list_vars[i].value)
+  return [get_normalized_change_var(list_old[list_vars[i]], list_vars[i].value) for i in range(len(list_vars))]
 
 def phase_II(model, complicating_constr_subsystem_name, complicating_vars, complicating_constr, simple_vars, folder, solver, iteration):
   # unfix the complicating variables
   unfix_variables(complicating_vars)
   fix_variables(simple_vars)
-  print(f"solving {complicating_constr_subsystem_name}")
+  # print(f"solving {complicating_constr_subsystem_name}")
   name = complicating_constr_subsystem_name
-  print("Number active constraints = ", 
-  len([constr for constr in model.find_component(name).component_data_objects(pyo.Constraint) if constr.active]))
-  print("Number of unfixed vars = ",
-  len([var for var in model.find_component(name).component_data_objects(pyo.Var) if not var.fixed]))
+  # print("Number active constraints = ", 
+  # len([constr for constr in model.find_component(name).component_data_objects(pyo.Constraint) if constr.active]))
+  # print("Number of unfixed vars = ",
+  # len([var for var in model.find_component(name).component_data_objects(pyo.Var) if not var.fixed]))
   return solve_subsystem(model.find_component(complicating_constr_subsystem_name), folder, solver, f"complicating_constr_{iteration}")
 
 def initialize_old_vals(variables):
@@ -520,14 +538,47 @@ def activate_constraints(model):
   for constr in model.component_data_objects(pyo.Constraint):
     constr.activate()
 
+def initialize_model_to_heuristic_point(model, use_fbbt):
+    igraph, incidence_matrix = get_incidence_matrix(model)
+    if use_fbbt:
+      execute_fbbt(model)
+    initial_vals = get_initial_values_guesses(model, igraph)
+    for var in igraph.variables:
+        var.value = initial_vals[var]
+    return
+
+def assign_initial_point_distance(parameter, initial_vals):
+    # feasible solution loaded in var
+    # parameter = 1 is the random point
+    # parameter = 0 is the feasible point
+    for var in initial_vals:
+      var.value = (1-parameter)*var.value + parameter*initial_vals[var]
+    return
+
+
+def strip_bounds_tf(model):
+  pyo.TransformationFactory('contrib.strip_var_bounds').apply_to(model)
+  return
+
+def print_subsystem_var(var, blocks, idx_var_map, complicating_vars):
+  subsystem_counter = 0
+  for vars, constraints in blocks:
+    for var_index in vars:
+      if idx_var_map[var_index].name == var.name:
+        print(var.name, "in subsystem : ", subsystem_counter)
+    subsystem_counter += 1
+  for vars in complicating_vars:
+    if vars.name == var.name:
+      print(var.name , " In Complicating Constraint Subsystem")
+
 def initialization_strategy(model, folder, method=2, num_part=4, fraction=0.5, 
   matched=False, d_max=1, n_max=2, solver="ipopt", use_init_heur="True", use_fbbt="True",
   max_iteration=100, border_fraction=0.5, algo_configuration=algorithmConfiguration(), test=0,
-  strip_model_bounds=False):
+  strip_model_bounds=False, distance=None):
   # the solver option default is a warm-start or an initial point
   # this provides a heuristic to give the solvers a starting point
   #assert use_init_heur == True 
-  final_folder = "FinalResultsRuns"
+  final_folder = "FinalResultsRunsDistance"
   if not os.path.exists(final_folder):
     os.mkdir(final_folder)
   first_folder = folder
@@ -538,6 +589,8 @@ def initialization_strategy(model, folder, method=2, num_part=4, fraction=0.5,
   list_variables = igraph.variables
   list_constraints = igraph.constraints
 
+  # print("Num variables = ", len(list_variables))
+  # print("Num constraints = ", len(list_constraints))
   # for var in list_variables:
   #   if var.lb != None and var.lb > 0 and var.lb < 1e-10:
   #     # print("lb is ", var.lb)
@@ -550,22 +603,40 @@ def initialization_strategy(model, folder, method=2, num_part=4, fraction=0.5,
     if use_fbbt:
       execute_fbbt(model)
     initial_vals = get_initial_values_guesses(model, igraph)
-    for var in igraph.variables:
-      var.value = initial_vals[var]
+    if distance == None:
+      for var in igraph.variables:
+        var.value = initial_vals[var]
   else:
     initial_vals = get_initial_values_default(model, igraph)
   
   old_vals = initialize_old_vals(list_variables)
 
-  if solver == "ipopt":
-    reset_bounds(list_variables, initial_bounds)
+  # output the value of the variables for feasible point
+  # for var in initial_vals:
+  #   print("Feasible point = ", var.value)
+  #   print("Initial point = ", initial_vals[var])
+    
+  if distance != None:
+    assign_initial_point_distance(distance, initial_vals)
+    old_vals = initialize_old_vals(list_variables)
+
   
+  # for var in initial_vals:
+  #   print("Combined point = ", var.value)
+  # sys.exit(0)
+
+
+  # if solver == "ipopt":
+  reset_bounds(list_variables, initial_bounds)
+
   if strip_model_bounds:
-    strip_bounds(list_variables)
-  for var in list_variables:
-    if var.lb == 0:
-      # set small tolerance
-      var.setlb(1e-15)
+    strip_bounds_tf(model)
+  # for var in list_variables:
+  #   if var.lb == 0:
+  #     if var.ub == 0: # make sure consistent for variables with equivalent lower and upper bounds
+  #       var.setub(1e-15)
+  #     # set small tolerance
+  #     var.setlb(1e-15)
   col_order, row_order, blocks, idx_var_map, idx_constr_map = \
     get_restructured_matrix_general(incidence_matrix, igraph, model, folder, method, fraction, num_part, matched, 
       d_max, n_max, border_fraction)
@@ -575,6 +646,17 @@ def initialization_strategy(model, folder, method=2, num_part=4, fraction=0.5,
   complicating_vars = get_list_of_complicating_variables(blocks, idx_var_map)
   simple_vars = get_list_of_simple_variables(blocks, idx_var_map)
   complicating_constr_subsystem_name = "complicating constraints"
+
+
+  # var_to_check = [
+  #     model.fs.heat_exchanger.hot_side.properties[0.0,0.4].temperature,
+  #     model.fs.heat_exchanger.hot_side._enthalpy_flow[0.0,0.35,'Liq'],
+  #     model.fs.heat_exchanger.hot_side._enthalpy_flow[0.0,0.85,'Liq'],
+  #     model.fs.heat_exchanger.hot_side.enthalpy_flow_dx[0.0,0.35,'Liq'],
+  #     model.fs.heat_exchanger.hot_side.enthalpy_flow_dx[0.0,0.85,'Liq']]
+  # for var in var_to_check:
+  #   print_subsystem_var(var, blocks, idx_var_map, complicating_vars)
+  # sys.exit(0)
 
   # algorithmic configurations
   phase_I_objective = algo_configuration.phase_I["subproblem_objective"]
@@ -658,22 +740,39 @@ def initialization_strategy(model, folder, method=2, num_part=4, fraction=0.5,
     if maximum_change < tolerance:
       break
 
+    if algo_configuration.constraint_consensus and algo_configuration.config in [7,8]:
+      print("Constraint consensus on subsystems with complicating variables")
+      # constraint consensus on the subsystem constraints and the complicating variables
+      constraint_list_cc1 = [idx_constr_map[constr] for block_constr in constr_list for constr in block_constr]
+      get_closer_initial_point(constraint_list_cc1, complicating_vars, 0.1, 1.0, 20)
+      unfix_variables(complicating_vars)
+
     subsystem_success = [True]
     activate_constraints(model)
     if algo_configuration.phase_I["nonlinear_program"] == 1:
       if deactivate_constraints_phase_I:
         deactivate_constraints(model)
       subsystem_success = phase_I(model, complicating_vars, simple_vars, subsystems, folder, iteration, solver)
+      get_list_normalized_change(simple_vars, old_vals)
 
     activate_constraints(model)
     if algo_configuration.phase_II["nonlinear_program"] == 1:
       if deactivate_constraints_phase_II:
         deactivate_constraints(model)
       subsystem_success.append(phase_II(model, complicating_constr_subsystem_name, complicating_vars, complicating_constr, simple_vars, folder, solver, iteration))
+      # get_list_normalized_change(complicating_vars, old_vals)
+
     # reactivate the constraints
       # if deactivate_constraints_phase_II:
       #   activate_constraints(model)
+
+    if algo_configuration.constraint_consensus and algo_configuration.config in [7,8]:
+      # constraint consensus on the subsystem constraints and the complicating variables
+      constraint_list_cc2 = [i for i in complicating_constr]
+      print("Constraint consensus on complicating constraints with simple variables")
+      get_closer_initial_point(constraint_list_cc2, simple_vars, 0.1, 1.0, 20)
     
+   
     if iteration >= 1:
       print("Iteration = ", iteration)
       sum_violation = sum(get_constraint_violation(constr) for constr in list_constraints)
@@ -724,7 +823,7 @@ def initialization_strategy(model, folder, method=2, num_part=4, fraction=0.5,
     # restructuring algorithm type
     file.write(f"method : {method}\n")
     # matched
-    file.write("matched : {}\n".format(1 if method else 0))
+    file.write("matched : {}\n".format(1 if matched else 0))
     # restructuring algorithm parameters
     file.write(f"d_max : {d_max}\n")
     file.write(f"n_max : {n_max}\n")
@@ -796,9 +895,11 @@ def get_closer_initial_point(list_constraints, list_variables, alpha, beta, iter
   return 
 
 def constraint_consensus(list_of_constraints, list_of_variables, alpha):
+  #np.seterr(all='raise')
   # keeps track of how many contribute component-wise
   # s_var = {i : 0 for i in range(len(vars))}
-  grad_constr = list(np.array(get_constraint_gradient_all_vars(constr, list_of_variables)) for constr in list_of_constraints)
+  grad_constr = list(np.array(get_constraint_gradient_all_vars(constr, list_of_variables)) 
+    for constr in list_of_constraints)
   
   norm_grad_constr = list(norm_l2(grad_c) for grad_c in grad_constr)
   # remove any constraint with 0 norm
@@ -811,7 +912,7 @@ def constraint_consensus(list_of_constraints, list_of_variables, alpha):
     adjust += 1
   # filter out by distance
   v = np.array(list(get_constraint_violation(constr) for constr in list_of_constraints))
-  distances = list(v[i] / norm_grad_constr[i] for i in range(len(norm_grad_constr)))
+  distances = list(v[i] / norm_grad_constr[i] if norm_grad_constr[i] != 0 else 0 for i in range(len(norm_grad_constr)))
 
   # eliminate any contributions of feasibility vectors that don't have a sufficient feasibility distance
   v = np.array([v[i] if distances[i] >= alpha else 0 for i in range(len(v))])
@@ -821,10 +922,18 @@ def constraint_consensus(list_of_constraints, list_of_variables, alpha):
   s = list(sum(1 if grad_constr[j][i] != 0 and v[j] != 0 else 0 for j in range(len(grad_constr)))
            for i in range(len(list_of_variables)))
   # fv = feasibility_vector, checked all divide by zeros
-  multiplier = d*v/squared_norm_grad_constr
+  multiplier = d*v/squared_norm_grad_constr 
   fv_list = list(multiplier[i]*grad_constr[i] for i in range(len(multiplier)))  # indexed by variable
   fv_consensus = np.sum(fv_list, axis=0)
   fv_consensus = list(fv_consensus[i]/s[i] if s[i] != 0 else 0 for i in range(len(s)))
+  # print("Fv consensus, distances, s, multiplier, squared_norm_grad_constr, norm_grad_constr, grad_constr : ")
+  # print(fv_consensus)
+  # print(distances)
+  # print(s)
+  # print("multiplier = ", multiplier)
+  # print("squared norm grad constr = ", squared_norm_grad_constr)
+  # print("norm grad constr = ", norm_grad_constr)
+  # print("grad_constr = ", grad_constr)
   return fv_consensus, distances, s
 
 def determine_d_constr(constraint):

@@ -151,10 +151,10 @@ class TestBlockDecompositionForSolver():
 
     def test_create_subsystem_from_constr_list(self):
         constr_list = [1,2]
-        subsystem = create_subsystem_from_constr_list(constr_list, self.idx_constr_map)
+        create_subsystem_from_constr_list(self.m, constr_list, self.idx_constr_map, "block_1")
         
-        variables = [var for var in subsystem.component_data_objects(pyo.Var)]
-        constraints = [constr for constr in subsystem.component_data_objects(pyo.Constraint)]
+        variables = [var for var in self.m.find_component("block_1").component_data_objects(pyo.Var)]
+        constraints = [constr for constr in self.m.find_component("block_1").component_data_objects(pyo.Constraint)]
 
         expected_variables = ["x1", "x3"]
         expected_constraints = ["cons2", "cons3"]
@@ -182,11 +182,10 @@ class TestBlockDecompositionForSolver():
 #     #     indirect=True
 #     # )
     def test_create_subsystems(self):
-        subsystems = create_subsystems([i[1] for i in self.blocks], self.idx_constr_map)
-        assert len(subsystems) == 2
-        for subsystem in subsystems:
-            variables = [var for var in subsystem.component_data_objects(pyo.Var)]
-            constraints = [constr for constr in subsystem.component_data_objects(pyo.Constraint)]
+        create_subsystems(self.m, [i[1] for i in self.blocks], self.idx_constr_map)
+        for idx in range(len(self.blocks)):
+            variables = [var for var in self.m.find_component(f"subsystem_{idx}").component_data_objects(pyo.Var)]
+            constraints = [constr for constr in self.m.find_component(f"subsystem_{idx}").component_data_objects(pyo.Constraint)]
 
             if self.method == 2:
                 if "x6" in [i.name for i in variables]:
@@ -307,9 +306,10 @@ class TestBlockDecompositionForSolverMatched():
         self.method = request.param
         # only 2 partitions for simplicity
         self.order, self.tmp, self.blocks, \
-            self.original_mapping_constr, self.original_mapping_var = \
+            self.original_mapping_var, self.original_mapping_constr = \
                 get_restructured_matrix_general(self.incidence_matrix, self.igraph, 
-                self.m, "test_problem", method=request.param, num_part=2, d_max=1, n_max=2, matched=True)
+                self.m, "test_problem", method=request.param, num_part=2, d_max=1, n_max=2, matched=True,
+                border_fraction=0.2)
 
     # @pytest.mark.parametrize(
     #     'method',
@@ -328,10 +328,10 @@ class TestBlockDecompositionForSolverMatched():
 
     def test_create_subsystem_from_block(self):
         block = [1,2]
-        subsystem = create_subsystem_from_block(block, self.original_mapping_constr)
+        create_subsystem_from_constr_list(self.m, block, self.original_mapping_constr, "block_1")
         
-        variables = [var for var in subsystem.component_data_objects(pyo.Var)]
-        constraints = [constr for constr in subsystem.component_data_objects(pyo.Constraint)]
+        variables = [var for var in self.m.find_component("block_1").component_data_objects(pyo.Var)]
+        constraints = [constr for constr in self.m.find_component("block_1").component_data_objects(pyo.Constraint)]
 
         expected_variables = ["x1", "x3"]
         expected_constraints = ["cons2", "cons3"]
@@ -352,11 +352,11 @@ class TestBlockDecompositionForSolverMatched():
     #     indirect=True
     # )
     def test_create_subsystems(self):
-        subsystems = create_subsystems_block(self.blocks, self.original_mapping_constr)
-        assert len(subsystems) == 2
-        for subsystem in subsystems:
-            variables = [var for var in subsystem.component_data_objects(pyo.Var)]
-            constraints = [constr for constr in subsystem.component_data_objects(pyo.Constraint)]
+        create_subsystems(self.m, [i[1] for i in self.blocks], self.original_mapping_constr)
+        for idx in range(len(self.blocks)):
+            variables = [var for var in self.m.find_component(f"subsystem_{idx}").component_data_objects(pyo.Var)]
+            constraints = [constr for constr in self.m.find_component(f"subsystem_{idx}").component_data_objects(pyo.Constraint)]
+
 
             if "x6" in [i.name for i in variables]:
 
@@ -491,50 +491,61 @@ class TestConstraintConsensus():
         expected_distances = [0.5, 1/math.sqrt(2), 1/2,  0.5/math.sqrt(3)]
         assert all(list(abs(expected_distances[i] - distances[i]) < 1e-10 for i in range(len(distances))))
        
-        # self.m.cons1 = pyo.Constraint(expr=self.m.x2 + self.m.x4 + self.m.x5 == 1.5)
-        # self.m.cons2 = pyo.Constraint(expr=self.m.x1 + self.m.x3 == 1)
-        # self.m.cons3 = pyo.Constraint(expr=self.m.x3 == 0.5)
-        # self.m.cons4 = pyo.Constraint(expr=self.m.x2 == 0.5)
-        # self.m.cons5 = pyo.Constraint(expr=self.m.x1 + self.m.x3 + self.m.x5 == 1.5)
-        # self.m.cons6 = pyo.Constraint(expr=self.m.x2 + self.m.x4 + self.m.x6 == 1.5)
+class TestBlockDecompositionForSolverMatchedConfig2():
+    @pytest.fixture(autouse=True)  
+    def set_model(self, request):
+        self.m = pyo.ConcreteModel()
+        self.m.x1 = pyo.Var(name="x1")
+        self.m.x2 = pyo.Var(name="x2")
+        self.m.x3 = pyo.Var(name="x3")
+        self.m.x4 = pyo.Var(name="x4")
+        self.m.x5 = pyo.Var(name="x5")
+        self.m.x6 = pyo.Var(name="x6")
+        self.m.x7 = pyo.Var(name="x7")
+        self.m.x8 = pyo.Var(name="x8")
 
-        # self.m.x1.value = 1
-        # self.m.x2.value = 1
-        # self.m.x3.value = 1
-        # self.m.x4.value = 0
-        # self.m.x5.value = 0
-        # self.m.x6.value = 0
+        # add some constraints here
+        self.m.cons1 = pyo.Constraint(expr=self.m.x2 + self.m.x4 + self.m.x5 == 1.5)
+        self.m.cons2 = pyo.Constraint(expr=self.m.x1 + self.m.x3 == 1)
+        self.m.cons3 = pyo.Constraint(expr=self.m.x3 + self.m.x7 == 1.0)
+        self.m.cons4 = pyo.Constraint(expr=self.m.x2 == self.m.x8 == 1.0)
+        self.m.cons5 = pyo.Constraint(expr=self.m.x1 + self.m.x3 + self.m.x5 == 1.5)
+        self.m.cons6 = pyo.Constraint(expr=self.m.x2 + self.m.x4 + self.m.x6 == 1.5)
+        self.m.cons7 = pyo.Constraint(expr=self.m.x2 + self.m.x3 + self.m.x7 = 1.5)
+        self.m.cons8 = pyo.Constraint(expr=self.m.x1 + self.m.x4 + self.m.x7 + self.m.x8 = 2.0)
 
-
-
-# class TestInitialization():
-#     # solution is x_i = 0.5
-#     @pytest.fixture(autouse=True)
-#     def set_model(self):
-#         self.m = pyo.ConcreteModel()
-#         self.m.x1 = pyo.Var(name="x1", bounds=(0,1))
-#         self.m.x2 = pyo.Var(name="x2", bounds=(0,1))
-#         self.m.x3 = pyo.Var(name="x3", bounds=(0,1))
-#         self.m.x4 = pyo.Var(name="x4", bounds=(0,1))
-#         self.m.x5 = pyo.Var(name="x5", bounds=(0,1))
-#         self.m.x6 = pyo.Var(name="x6", bounds=(0,1))
-
-#         self.m.cons1 = pyo.Constraint(expr=self.m.x2 + self.m.x4  == 1.5 - self.m.x5)
-#         self.m.cons2 = pyo.Constraint(expr=self.m.x1 + self.m.x3 == 1)
-#         self.m.cons3 = pyo.Constraint(expr=self.m.x3 == 0.5)
-#         self.m.cons4 = pyo.Constraint(expr=self.m.x2 == 0.5)
-#         self.m.cons5 = pyo.Constraint(expr=self.m.x1 + self.m.x3 == 1.5 - self.m.x5)
-#         self.m.cons6 = pyo.Constraint(expr=self.m.x2 + self.m.x4 + self.m.x6 == 1.5)
+        self.igraph, self.incidence_matrix = get_incidence_matrix(self.m)
+        self.method = 2
+        # only 2 partitions for simplicity
+        self.order, self.tmp, self.blocks, \
+            self.idx_var_map, self.idx_constr_map = \
+                get_restructured_matrix_general(self.incidence_matrix, self.igraph, 
+                self.m, "test_problem", method=self.method, num_part=2, d_max=1, n_max=2, matched=True,
+                border_fraction=0.2)
     
-#     def test_initialization_strategy(self):
-#         for var in self.m.component_objects(pyo.Var):
-#             print(var.name, var.value)
-#         initialization_strategy(self.m, method=2, num_part=2, fraction=0.6)
-#         for var in self.m.component_objects(pyo.Var):
-#             print(var.name, var.value)
-#         assert False
+    def test_visual_1(self):
+        assert True
 
-    
+    def test_show_decomposed_matrix(self):
+        self.col_order, self.row_order, self.blocks, self.idx_var_map, self.idx_constr_map = \
+            get_restructured_matrix(self.incidence_matrix, self.igraph, self.m, "test_problem", method=1, fraction=1.1)
+        show_decomposed_matrix(self.m, method=1, fraction=1.1)
+        assert True #visual test
+
+    def test_get_restructured_matrix_gp(self):
+        # only 2 partitions for simplicity
+        self.col_order, self.row_order, self.blocks, self.idx_var_map, self.idx_constr_map = \
+            get_restructured_matrix(self.incidence_matrix, self.igraph, self.m, "test_problem", method=2, num_part=2)
+        show_decomposed_matrix(self.m, method=2, num_part=2)
+
+        print(self.col_order)
+        print(self.row_order)
+        print(self.blocks)
+        # assert self.col_order == [1, 0, 2, 3]
+        # assert self.row_order == [0, 3, 1, 2]
+        # assert self.blocks == [[[1, 0], [0, 3]], [[2, 3], [1, 2]]]
+        assert True
+
 
 
         
