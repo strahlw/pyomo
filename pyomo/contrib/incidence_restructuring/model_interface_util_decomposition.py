@@ -105,7 +105,7 @@ def get_adjacency_and_map_pyomo_model(m):
 def get_adjacency_size(adjacency_list):
   return {i : len(adjacency_list[i]) for i in adjacency_list}
 
-def get_restructured_matrix_matched(incidence_matrix, igraph, folder, method=1, num_part=4, d_max=10, n_max = 2, border_fraction=0.5):
+def get_restructured_matrix_matched(incidence_matrix, igraph, folder, method=1, num_part=4, d_max=2, n_max=1, border_fraction=0.5, show=False):
   matched_matrix, col_map, idx_var_map, idx_constr_map = create_perfect_matching(igraph, incidence_matrix)
   overall_adjacency = create_adj_list_from_matrix(matched_matrix)
   assert method == 1 or method == 2
@@ -113,6 +113,9 @@ def get_restructured_matrix_matched(incidence_matrix, igraph, folder, method=1, 
   if method == 1:
     column_order, all_blocks, border_indices = bbbd_algo(overall_adjacency, 
         get_adjacency_size(overall_adjacency), d_max, n_max, border_fraction)
+
+    if show:
+      display_reordered_matrix(column_order, column_order, matched_matrix)
     
     return column_order, column_order, reformat_blocks(method, all_blocks), \
       col_map, idx_var_map, idx_constr_map
@@ -120,7 +123,10 @@ def get_restructured_matrix_matched(incidence_matrix, igraph, folder, method=1, 
   if method == 2:
     column_order, partitions, border_indices = graph_partitioning_algorithm(num_part, 
                                                       overall_adjacency, folder)
-    
+    #print(column_order, num_part)
+    if show:
+      display_reordered_matrix(column_order, column_order, matched_matrix)
+   
     return column_order, column_order, reformat_blocks(method, partitions), \
       col_map, idx_var_map, idx_constr_map
   
@@ -229,6 +235,11 @@ def get_restructured_matrix(incidence_matrix, igraph, model, folder,
     return *graph_partitioning_algorithm_general(num_part, edge_list, adjacency_list, n, m, folder),\
         *get_variable_constraint_maps(igraph)
 
+# note: for the matched matrices, the component maps mapping the indices to the variables and constraints
+# are to the reordering for the MATCHED matrix, which the blocks reference.
+# to display the reordered matrix structure, the column and row order need to be used with the MATCHED matrix
+# The implication of this is that the row order and column order SHOULD ONLY BE USED FOR DISPLAYING RESTRUCTURED MATRICES
+# and not for identifying complicating variables and/or constraints.
 def get_restructured_matrix_general(incidence_matrix, igraph, model, folder, 
     method=1, fraction=0.9, num_part=4, matched=False, d_max=2, n_max=1, border_fraction=0.5):
   # wrapper for the matched version and non-matched versions of the algorithm
@@ -243,24 +254,19 @@ def get_restructured_matrix_general(incidence_matrix, igraph, model, folder,
     idx_constr_map, idx_var_map = get_mappings_to_original(col_order, col_map, idx_var_map, idx_constr_map)
     return col_order, row_order, blocks, idx_var_map, idx_constr_map
 
-def get_complicating_variables(blocks, col_order):
-  size_blocks = sum(len(i[0] for i in blocks))
-  return col_order[size_blocks:]
-
-def get_complicating_constraints(blocks, row_order):
-  # assertion for square blocks
-  assert all([len(i[0]) == len(i[1]) for i in blocks])
-  size_blocks = sum(len(i[0] for i in blocks))
-  return row_order[size_blocks:]
-  
 def show_decomposed_matrix(model, method=1, fraction=0.9, num_part=4):
   igraph, incidence_matrix = get_incidence_matrix(model)
   show_matrix_structure(incidence_matrix)
   col_order, row_order, blocks, idx_var_map, idx_constr_map = \
-    get_restructured_matrix(incidence_matrix, igraph, model, "test_problem", method, fraction, num_part)
+    get_restructured_matrix_matched(incidence_matrix, igraph, "test_problem", method, border_fraction=fraction, num_part=num_part)
   print(len(blocks))
   print([len(i[0]) for i in blocks])
   # print([len(i[1]) for i in blocks])
+  reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
+     len(col_order), row_order, col_order, incidence_matrix)
+  show_matrix_structure(reordered_incidence_matrix)
+
+def display_reordered_matrix(row_order, col_order, incidence_matrix):
   reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
      len(col_order), row_order, col_order, incidence_matrix)
   show_matrix_structure(reordered_incidence_matrix)
@@ -293,8 +299,8 @@ def create_subsystem_from_constr_list(model, constr_idx_list, constr_map, name):
   # get constraint names
   constr_obj = [constr_map[i] for i in constr_idx_list]
   model.add_component(name, create_subsystem_block(constr_obj))
-  model.find_component(name).obj = pyo.Objective(expr = 1/1e10 *create_residual_objective_expression(constr_obj))
-  #model.find_component(name).obj = pyo.Objective(expr = create_residual_objective_expression(constr_obj))
+  # model.find_component(name).obj = pyo.Objective(expr = 1/1e10 *create_residual_objective_expression(constr_obj))
+  model.find_component(name).obj = pyo.Objective(expr = create_residual_objective_expression(constr_obj))
   for constr in constr_obj:
     constr.deactivate()
   return
@@ -327,7 +333,7 @@ def solve_subsystems_sequential(model, subsystem_names, folder, solver="ipopt"):
 
 def solve_subsystem(subsystem, folder, solver, idx):
     assert solver == "ipopt" or solver == "conopt"
-    subsystem.pprint()
+    # subsystem.pprint()
     if solver == "ipopt":
       return solve_subsystem_ipopt(subsystem, folder, idx)
     if solver == "conopt":
@@ -336,8 +342,8 @@ def solve_subsystem(subsystem, folder, solver, idx):
 
 def solve_subsystem_conopt(subsystem, folder, id):
   # subsystem.pprint()
-  from pyomo.common.tempfiles import TempfileManager
-  TempfileManager.tempdir = "/.nfs/home/strahlw/GAMS/pyomoTmp/conopt"
+  # from pyomo.common.tempfiles import TempfileManager
+  # TempfileManager.tempdir = "/.nfs/home/strahlw/GAMS/pyomoTmp/conopt"
   solver =  pyo.SolverFactory('gams')
   opts = {}
   opts["solver"] = "conopt"
@@ -345,7 +351,7 @@ def solve_subsystem_conopt(subsystem, folder, id):
   try:
     # 1000 iterations for conopt
     results = solver.solve(subsystem, io_options=opts, 
-      tmpdir= "/.nfs/home/strahlw/GAMS/pyomoTmp/conopt", keepfiles=True,
+      #tmpdir= "/.nfs/home/strahlw/GAMS/pyomoTmp/conopt", keepfiles=True,
       logfile=os.path.join(folder,"block_{}_logfile_conopt.log".format(id)))
     if results.solver.status == SolverStatus.error:
       return False
@@ -357,7 +363,7 @@ def solve_subsystem_conopt(subsystem, folder, id):
   except Exception as e:
     print("Solver ERROR")
     print(e)
-    return False
+    return False  
   return True
 
 def solve_subsystem_ipopt(subsystem, folder, id):
@@ -865,6 +871,110 @@ def initialization_strategy(model, folder, method=2, num_part=4, fraction=0.5,
     file.write(f"test : {test}\n")
 
 
+def initialization_strategy_LC_overlap(model, folder, method=2, num_part=4, fraction=0.5, 
+  matched=False, d_max=1, n_max=2, solver="ipopt", use_init_heur="True", use_fbbt="True",
+  max_iteration=100, border_fraction=0.5, algo_configuration=algorithmConfiguration(), test=0,
+  strip_model_bounds=False, distance=None):
+  final_folder = "FinalResultsRunsDistance"
+  if not os.path.exists(final_folder):
+    os.mkdir(final_folder)
+  first_folder = folder
+  create_subfolder(folder)
+  folder = os.path.join(folder, "Results")
+  create_subfolder(folder)
+  igraph, incidence_matrix = get_incidence_matrix(model)
+  list_variables = igraph.variables
+  list_constraints = igraph.constraints
+  initial_bounds = get_original_bounds(model, igraph)
+  if use_init_heur:
+    if use_fbbt:
+      execute_fbbt(model)
+    initial_vals = get_initial_values_guesses(model, igraph)
+    if distance == None:
+      for var in igraph.variables:
+        var.value = initial_vals[var]
+  else:
+    initial_vals = get_initial_values_default(model, igraph)
+  
+  old_vals = initialize_old_vals(list_variables)
+
+  if distance != None:
+    assign_initial_point_distance(distance, initial_vals)
+    old_vals = initialize_old_vals(list_variables)
+
+  reset_bounds(list_variables, initial_bounds)
+
+  if strip_model_bounds:
+    strip_bounds_tf(model)
+
+  col_order, row_order, blocks, idx_var_map, idx_constr_map = \
+  get_restructured_matrix_general(incidence_matrix, igraph, model, folder, method, fraction, num_part, matched, 
+    d_max, n_max, border_fraction)
+  constr_list = [i[1] for i in blocks]
+  var_list = [i[0] for i in blocks]
+  complicating_constr = get_list_of_complicating_constraints(blocks, idx_constr_map)
+  complicating_constr_idxs = get_list_complicating_constraint_indices(blocks, idx_constr_map)
+  complicating_vars = get_list_of_complicating_variables(blocks, idx_var_map)
+  simple_vars = get_list_of_simple_variables(blocks, idx_var_map)
+  complicating_constr_subsystem_name = "complicating constraints"
+
+  subsystem_constr_list = [i + complicating_constr_idxs for i in constr_list]
+  subsystems = create_subsystems(model, subsystem_constr_list, idx_constr_map, no_objective=True)
+  constr_list_all = [idx_constr_map[constr] for constr in idx_constr_map]
+
+  # create "global approximation" - shared solution
+  # initialize to the value the variables are initialized to
+  global_approximation = ComponentMap()
+  for idx in idx_var_map:
+      global_approximation[idx_var_map[idx]] = idx_var_map[idx].value
+    
+  # for var in global_approximation:
+  #   print(var.name, " : ", var.value)
+  
+  subsystem_solutions = []
+  for subsystem in subsystems:
+      solutions = ComponentMap()
+      for idx in idx_var_map:
+          solutions[idx_var_map[idx]] = global_approximation[idx_var_map[idx]]
+      subsystem_solutions.append(solutions)
+  
+  # the iteration part of the algorithm 
+  iteration = 0
+  while True:
+    if iteration >= max_iteration:
+      break
+
+    for idx, subsystem in enumerate(subsystems):
+        solve_subsystem(model.find_component(subsystem), folder, solver, f"{idx}")
+        print("Solve subsystem {}".format(idx))
+        for var in subsystem_solutions[idx]:
+            # print(var.name, " : ", var.value)
+            subsystem_solutions[idx][var] = var.value
+            var.value = global_approximation[var]
+    
+    # update the global approximation from each subsystem
+    for i in range(len(var_list)):
+        # print("Updates from subsystem {}".format(i))
+        for var_idx in var_list[i]:
+            # print(idx_var_map[var_idx].name, " new value = ", subsystem_solutions[i][idx_var_map[var_idx]])
+            idx_var_map[var_idx].value = set_within_bounds(subsystem_solutions[i][idx_var_map[var_idx]], 
+              idx_var_map[var_idx].lb, idx_var_map[var_idx].ub)
+    
+    # update the linking constraint variables
+    for var in complicating_vars:
+        var.value = set_within_bounds(sum([subsystem_solutions[i][var] for i in range(len(subsystem_solutions))])/len(subsystem_solutions), var.lb, var.ub)
+    
+    # update the global approximation
+    for var in global_approximation:
+        global_approximation[var] = var.value
+    
+    # print("updated global approximation")
+    # for var in global_approximation:
+    #     print(var.name, " : ", var.value)
+    
+    print("sum of violation : ", sum(get_constraint_violation(constr) for constr in constr_list_all))
+    iteration += 1
+
 def get_closer_initial_point(list_constraints, list_variables, alpha, beta, iter_lim):
   iteration = 0
   fv_consensus, distances, s = constraint_consensus(list_constraints, list_variables, alpha)
@@ -953,6 +1063,15 @@ def get_constraint_violation(constraint):
   return abs(pyo.value(constraint.body) - constraint.upper)
 
 def adjust_consensus_value(val, lb, ub):
+  if ub == None and lb == None:
+    return val
+  if lb == None:
+    return min(val, ub)
+  if ub == None:
+    return max(lb, val)
+  return max(lb, min(val, ub))
+
+def set_within_bounds(val, lb, ub):
   if ub == None and lb == None:
     return val
   if lb == None:
@@ -1056,3 +1175,99 @@ def BBBD_initializer_sequential(model, method=1, num_part=4, d_max=10, n_max=2, 
 #       print("Size of partitions = ", [len(partitions[i]) for i in partitions])
   
 
+# import numpy as np 
+# import scipy as sc
+# import matplotlib.pyplot as plt
+# import random
+# import sys
+
+
+# def create_matrix(seed):
+#     random.seed(seed)
+#     size_matrix = 20
+#     size_matrix_m = size_matrix
+#     size_matrix_n = size_matrix
+#     fill_matrix = 60 # maximum possible fill per row before adding diagonal
+#     original_matrix = np.zeros((size_matrix, size_matrix))
+#     for i in range(size_matrix):
+#         # for each row select a number of indices to make nonzero
+#         num_non_zeros = random.randint(0,int((size_matrix-1)*fill_matrix/100))
+#         indices_used = []
+#         for j in range(num_non_zeros):
+#             # for each non zero, randomly choose an index (and keep track)
+#             if j == 0:
+#                 index_to_fill = random.randint(0, size_matrix-1)
+#                 original_matrix[i][index_to_fill] = 1
+#                 indices_used.append(index_to_fill)
+#             else:
+#                 index_to_fill = random.randint(0, size_matrix-1)
+#                 while index_to_fill in indices_used:
+#                     index_to_fill = random.randint(0, size_matrix-1)
+#                 original_matrix[i][index_to_fill] = 1
+#                 indices_used.append(index_to_fill)
+#     return original_matrix
+
+
+# def reorder_sparse_matrix(m, n, row_order, col_order, target_matrix):
+#   target_matrix = sc.sparse.coo_matrix(target_matrix)
+#   permutation_matrix = sc.sparse.eye(m).tocoo()
+#   permutation_matrix.col = permutation_matrix.col[row_order]
+#   permuted_matrix = permutation_matrix.dot(target_matrix)
+#   permutation_matrix = sc.sparse.eye(n).tocoo()
+#   permutation_matrix.row = permutation_matrix.row[col_order]
+#   return permuted_matrix.dot(permutation_matrix)
+
+# def show_matrix_structure(matrix):
+#   plt.spy(matrix)
+#   plt.show()
+
+# def matrix_to_edges(matrix):
+#     edges = []
+#     for i in range(len(matrix)):
+#         for j in range(len(matrix[0])):
+#             if matrix[i][j] == 1:
+#                 edges.append((i,j))
+#     return edges 
+
+# # original_matrix = np.array([[0,0],[0,0]])
+# # print(original_matrix)
+# # show_matrix_structure(original_matrix)
+
+
+# seeds = range(100)
+# failed = []
+# for i in seeds:
+#     print("Instance ", i)
+#     original_matrix = create_matrix(i)
+#     test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), 0.5)
+#     # try:
+#     col_order, row_order, blocks = test.solve()
+
+#     print(max(test.blocks[i].size for i in test.blocks))
+#     print([test.blocks[i].size for i in test.blocks])
+# reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
+#     len(col_order), row_order, col_order, original_matrix)
+#     except:
+#         failed.append(i)
+
+#failed = [8]
+# original_matrix = create_matrix(14)
+# print(original_matrix)
+# # show_matrix_structure(original_matrix)
+# test = BBBD_algo(matrix_to_edges(original_matrix), len(original_matrix), len(original_matrix[0]), 1.1)
+# col_order, row_order, blocks = test.solve()
+# reordered_incidence_matrix = reorder_sparse_matrix(len(row_order),
+#     len(col_order), row_order, col_order, original_matrix)
+# print(col_order, row_order, blocks)
+# show_matrix_structure(reordered_incidence_matrix)
+# print(failed)
+
+# edges = [(0,1),(0,3), (1,0), (1,2), (2,2), (3,1)]
+# m = 4
+# n = 4
+
+# bbbd_algo = BBBD_algo(edges, m, n, 0.5)
+# bbbd_algo.iteration()
+# bbbd_algo.iteration()
+# bbbd_algo.iteration()
+# bbbd_algo.iteration()

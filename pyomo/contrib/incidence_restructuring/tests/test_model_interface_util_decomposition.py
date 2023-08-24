@@ -508,44 +508,383 @@ class TestBlockDecompositionForSolverMatchedConfig2():
         self.m.cons1 = pyo.Constraint(expr=self.m.x2 + self.m.x4 + self.m.x5 == 1.5)
         self.m.cons2 = pyo.Constraint(expr=self.m.x1 + self.m.x3 == 1)
         self.m.cons3 = pyo.Constraint(expr=self.m.x3 + self.m.x7 == 1.0)
-        self.m.cons4 = pyo.Constraint(expr=self.m.x2 == self.m.x8 == 1.0)
+        self.m.cons4 = pyo.Constraint(expr=self.m.x2 + self.m.x8 == 1.0)
         self.m.cons5 = pyo.Constraint(expr=self.m.x1 + self.m.x3 + self.m.x5 == 1.5)
         self.m.cons6 = pyo.Constraint(expr=self.m.x2 + self.m.x4 + self.m.x6 == 1.5)
-        self.m.cons7 = pyo.Constraint(expr=self.m.x2 + self.m.x3 + self.m.x7 = 1.5)
-        self.m.cons8 = pyo.Constraint(expr=self.m.x1 + self.m.x4 + self.m.x7 + self.m.x8 = 2.0)
+        self.m.cons7 = pyo.Constraint(expr=self.m.x2 + self.m.x3 + self.m.x7 == 1.5)
+        self.m.cons8 = pyo.Constraint(expr=self.m.x1 + self.m.x4 + self.m.x8 == 1.5)
+        # self.m = pyo.ConcreteModel()
+        # self.m.obj = pyo.Objective(expr=0)
+        # self.m.x1 = pyo.Var(name="x1")
+        # self.m.x2 = pyo.Var(name="x2")
+        # self.m.x3 = pyo.Var(name="x3")
+        # self.m.x4 = pyo.Var(name="x4")
+        # self.m.x5 = pyo.Var(name="x5")
+        # self.m.x6 = pyo.Var(name="x6")
+        # self.m.x7 = pyo.Var(name="x7")
+        # self.m.x8 = pyo.Var(name="x8")
 
+        # # add some constraints here
+        # self.m.cons1 = pyo.Constraint(expr=pyo.log(self.m.x2) + self.m.x4**3 + pyo.sqrt(self.m.x5) == pyo.log(0.5) + 0.5**3 + pyo.sqrt(0.5))
+        # self.m.cons2 = pyo.Constraint(expr=self.m.x1*self.m.x3 == 0.25)
+        # self.m.cons3 = pyo.Constraint(expr=self.m.x3*self.m.x7**2 == 0.5**3)
+        # self.m.cons4 = pyo.Constraint(expr=pyo.exp(self.m.x2 + self.m.x8) == pyo.exp(1))
+        # self.m.cons5 = pyo.Constraint(expr=self.m.x1*self.m.x3*self.m.x5 == 0.5**3)
+        # self.m.cons6 = pyo.Constraint(expr=self.m.x2**2 + self.m.x4**2 + self.m.x6**2 == 3*(0.25))
+        # self.m.cons7 = pyo.Constraint(expr=self.m.x2 + self.m.x3**2 + self.m.x7 == 1.25)
+        # self.m.cons8 = pyo.Constraint(expr=self.m.x1**4 + self.m.x4 + self.m.x8**4 == 2*(0.5)**4 + 0.5)
+       
         self.igraph, self.incidence_matrix = get_incidence_matrix(self.m)
         self.method = 2
         # only 2 partitions for simplicity
         self.order, self.tmp, self.blocks, \
             self.idx_var_map, self.idx_constr_map = \
                 get_restructured_matrix_general(self.incidence_matrix, self.igraph, 
-                self.m, "test_problem", method=self.method, num_part=2, d_max=1, n_max=2, matched=True,
+                self.m, "test_problem", method=self.method, fraction=0.2, num_part=2, matched=True, d_max=2, n_max=1, 
                 border_fraction=0.2)
+
+        self.complicating_constraints = get_list_complicating_constraint_indices(self.blocks, self.idx_constr_map)
+        self.complicating_variables = get_list_of_complicating_variables(self.blocks, self.idx_var_map)
+        self.constr_list = [i[1] for i in self.blocks]
+        self.var_list = [i[0] for i in self.blocks]
+        self.subsystem_constr_list = [i + self.complicating_constraints for i in self.constr_list]
+        self.subsystems = create_subsystems(self.m, self.subsystem_constr_list, self.idx_constr_map, no_objective=True)
+        self.constr_list_all = [self.idx_constr_map[constr] for constr in self.idx_constr_map]
     
-    def test_visual_1(self):
-        assert True
-
-    def test_show_decomposed_matrix(self):
-        self.col_order, self.row_order, self.blocks, self.idx_var_map, self.idx_constr_map = \
-            get_restructured_matrix(self.incidence_matrix, self.igraph, self.m, "test_problem", method=1, fraction=1.1)
-        show_decomposed_matrix(self.m, method=1, fraction=1.1)
-        assert True #visual test
-
-    def test_get_restructured_matrix_gp(self):
-        # only 2 partitions for simplicity
-        self.col_order, self.row_order, self.blocks, self.idx_var_map, self.idx_constr_map = \
-            get_restructured_matrix(self.incidence_matrix, self.igraph, self.m, "test_problem", method=2, num_part=2)
-        show_decomposed_matrix(self.m, method=2, num_part=2)
-
-        print(self.col_order)
-        print(self.row_order)
+    def test_display_reordered_matrix(self):
+        get_restructured_matrix_matched(self.incidence_matrix, self.igraph, "test_folder", 
+            method=1, num_part=2, d_max=2, n_max=1, 
+            border_fraction=0.2, show=True)
+        # show_matrix_structure(self.incidence_matrix)
+        # show_decomposed_matrix(self.m, method=2, num_part=2)
+        #display_reordered_matrix(self.order, self.tmp, self.incidence_matrix)
         print(self.blocks)
-        # assert self.col_order == [1, 0, 2, 3]
-        # assert self.row_order == [0, 3, 1, 2]
-        # assert self.blocks == [[[1, 0], [0, 3]], [[2, 3], [1, 2]]]
-        assert True
+        for idx, i in enumerate(self.idx_constr_map):
+            print(idx, " : ", self.idx_constr_map[i].name)
+        for idx, i in enumerate(self.idx_var_map):
+            print(idx, " : ", self.idx_var_map[i].name)
 
+        assert True #visual test
+    
+    def test_subsystem_partitioning(self):
+        print("Blocks : ", self.blocks)
+        for constr in self.complicating_constraints:
+            print(self.idx_constr_map[constr].name)
+        for var in self.complicating_variables:
+            print(var.name)
+        for idx, constrs in enumerate(self.subsystem_constr_list):
+            print("Subsystem {}".format(idx))
+            for constr in constrs:
+                print(self.idx_constr_map[constr].name)
+            print("Variable(s) to report : ")
+            for var in self.var_list[idx]:
+                print(self.idx_var_map[var].name)
+        assert False
+    
+    def test_first_solve(self):
+        starting_value = 10
+        global_approximation = ComponentMap()
+        for idx in self.idx_var_map:
+            if idx%2 == 0:
+                global_approximation[self.idx_var_map[idx]] = starting_value  # initialize to 2 
+            else:
+                global_approximation[self.idx_var_map[idx]] = -starting_value  # initialize to 2 
+            self.idx_var_map[idx].value = starting_value
+        # for idx in self.idx_var_map:
+        #     global_approximation[self.idx_var_map[idx]] = self.idx_var_map[idx].value
+        for var in global_approximation:
+            print(var.name, var.value)
+        
+        subsystem_solutions = []
+        for subsystem in self.subsystems:
+            solutions = ComponentMap()
+            for idx in self.idx_var_map:
+                solutions[self.idx_var_map[idx]] = global_approximation[self.idx_var_map[idx]]
+            subsystem_solutions.append(solutions)
+
+        # solve the system, have to reload the global approximate solution at each step and store
+        # the solution for each subsystem at each step
+        for i in range(2):
+            for idx, subsystem in enumerate(self.subsystems):
+                solve_subsystem(self.m.find_component(subsystem), "test_problem", "conopt",  idx)
+                print("Solve subsystem {}".format(idx))
+                for var in subsystem_solutions[idx]:
+                    print(var.name, " : ", var.value)
+                    subsystem_solutions[idx][var] = var.value
+                    var.value = global_approximation[var]
+            
+            # update the global approximation from each subsystem
+            for i in range(len(self.var_list)):
+                print("Updates from subsystem {}".format(i))
+                for var_idx in self.var_list[i]:
+                    print(self.idx_var_map[var_idx].name, " new value = ", subsystem_solutions[i][self.idx_var_map[var_idx]])
+                    self.idx_var_map[var_idx].value = subsystem_solutions[i][self.idx_var_map[var_idx]]
+            
+            # update the linking constraint variables
+            for var in self.complicating_variables:
+                var.value = sum([subsystem_solutions[i][var] for i in range(len(subsystem_solutions))])/len(subsystem_solutions)
+            
+            # update the global approximation
+            for var in global_approximation:
+                global_approximation[var] = var.value
+            
+            print("updated global approximation")
+            for var in global_approximation:
+                print(var.name, " : ", var.value)
+            
+            print("sum of violation : ", sum(get_constraint_violation(constr) for constr in self.constr_list_all))
+        assert False
+
+    def test_initialization_strategy_LC_overlap(self):
+        # self.test_first_solve()
+        initialization_strategy_LC_overlap(self.m, "test_problem", method=2, num_part=2, fraction=0.5, matched=True,
+            d_max=1, n_max=2, solver="ipopt", use_init_heur=1, use_fbbt=1, max_iteration=5, border_fraction=0.5, test=0,
+            strip_model_bounds=False, distance=None)
+        assert False
+    
+    
+    
+
+class TestStrategyLinearModel():
+    @pytest.fixture(autouse=True)  
+    def set_model(self, request):
+        self.m = pyo.ConcreteModel()
+        self.m.x1 = pyo.Var(name="x1")
+        self.m.x2 = pyo.Var(name="x2")
+        self.m.x3 = pyo.Var(name="x3")
+        self.m.x4 = pyo.Var(name="x4")
+        self.m.x5 = pyo.Var(name="x5")
+        self.m.x6 = pyo.Var(name="x6")
+        self.m.x7 = pyo.Var(name="x7")
+        self.m.x8 = pyo.Var(name="x8")
+
+        # add some constraints here
+        self.m.cons1 = pyo.Constraint(expr=self.m.x2 + self.m.x4 + self.m.x5 == 1.5)
+        self.m.cons2 = pyo.Constraint(expr=self.m.x1 + self.m.x3 == 1)
+        self.m.cons3 = pyo.Constraint(expr=self.m.x3 + self.m.x7 == 1.0)
+        self.m.cons4 = pyo.Constraint(expr=self.m.x2 + self.m.x8 == 1.0)
+        self.m.cons5 = pyo.Constraint(expr=self.m.x1 + self.m.x3 + self.m.x5 == 1.5)
+        self.m.cons6 = pyo.Constraint(expr=self.m.x2 + self.m.x4 + self.m.x6 == 1.5)
+        self.m.cons7 = pyo.Constraint(expr=self.m.x2 + self.m.x3 + self.m.x7 == 1.5)
+        self.m.cons8 = pyo.Constraint(expr=self.m.x1 + self.m.x4 + self.m.x8 == 1.5)
+       
+        self.igraph, self.incidence_matrix = get_incidence_matrix(self.m)
+        self.method = 2
+        # only 2 partitions for simplicity
+        self.order, self.tmp, self.blocks, \
+            self.idx_var_map, self.idx_constr_map = \
+                get_restructured_matrix_general(self.incidence_matrix, self.igraph, 
+                self.m, "test_problem", method=self.method, fraction=0.2, num_part=2, matched=True, d_max=2, n_max=1, 
+                border_fraction=0.2)
+
+        self.complicating_constraints = get_list_complicating_constraint_indices(self.blocks, self.idx_constr_map)
+        self.complicating_variables = get_list_of_complicating_variables(self.blocks, self.idx_var_map)
+        self.constr_list = [i[1] for i in self.blocks]
+        self.var_list = [i[0] for i in self.blocks]
+        self.nonlinking_vars = [self.idx_var_map[var] for array in self.var_list for var in array]
+        self.subsystem_constr_list = [i + self.complicating_constraints for i in self.constr_list]
+        self.subsystems = create_subsystems(self.m, self.subsystem_constr_list, self.idx_constr_map, no_objective=True)
+        self.constr_list_all = [self.idx_constr_map[constr] for constr in self.idx_constr_map]
+        self.linking_constraint_subsytem = create_subsystem_from_constr_list(self.m, self.complicating_constraints, 
+                                                self.idx_constr_map, "linking_constraint_subsystem")
+        
+        # problem settings:
+        self.starting_value = 10
+        self.alternate = False
+        self.solver = "conopt"
+        self.num_iterations = 5
+        self.folder = "test_problem_strategy_2"
+
+    
+    def test_display_reordered_matrix(self):
+        get_restructured_matrix_matched(self.incidence_matrix, self.igraph, "test_folder", 
+            method=1, num_part=2, d_max=2, n_max=1, 
+            border_fraction=0.2, show=True)
+        # show_matrix_structure(self.incidence_matrix)
+        # show_decomposed_matrix(self.m, method=2, num_part=2)
+        #display_reordered_matrix(self.order, self.tmp, self.incidence_matrix)
+        print(self.blocks)
+        for idx, i in enumerate(self.idx_constr_map):
+            print(idx, " : ", self.idx_constr_map[i].name)
+        for idx, i in enumerate(self.idx_var_map):
+            print(idx, " : ", self.idx_var_map[i].name)
+
+        assert True #visual test
+    
+    def test_subsystem_partitioning(self):
+        print("Blocks : ", self.blocks)
+        for constr in self.complicating_constraints:
+            print(self.idx_constr_map[constr].name)
+        for var in self.complicating_variables:
+            print(var.name)
+        for idx, constrs in enumerate(self.subsystem_constr_list):
+            print("Subsystem {}".format(idx))
+            for constr in constrs:
+                print(self.idx_constr_map[constr].name)
+            print("Variable(s) to report : ")
+            for var in self.var_list[idx]:
+                print(self.idx_var_map[var].name)
+        print("nonlinking variables")
+        for var in self.nonlinking_vars:
+            print(var.name)
+        print("Linking constraint subsystem")
+        for var in self.m.find_component("linking_constraint_subsystem").component_data_objects(pyo.Var):
+            print(var.name)
+        for constr in self.m.find_component("linking_constraint_subsystem").component_data_objects(pyo.Constraint):
+            print(constr.name)
+        assert False
+
+    def test_strategy_1(self):
+        for constr in [self.idx_constr_map[i] for i in self.complicating_constraints]:
+            constr.activate()
+        global_approximation = ComponentMap()
+        for idx in self.idx_var_map:
+            if self.alternate and idx%2 == 0:
+                global_approximation[self.idx_var_map[idx]] = -self.starting_value  # initialize to 2 
+            else:
+                global_approximation[self.idx_var_map[idx]] = self.starting_value  # initialize to 2 
+            self.idx_var_map[idx].value = global_approximation[self.idx_var_map[idx]]
+        # for idx in self.idx_var_map:
+        #     global_approximation[self.idx_var_map[idx]] = self.idx_var_map[idx].value
+        for var in global_approximation:
+            print(var.name, var.value)
+        
+        subsystem_solutions = []
+        for subsystem in self.subsystems:
+            solutions = ComponentMap()
+            for idx in self.idx_var_map:
+                solutions[self.idx_var_map[idx]] = global_approximation[self.idx_var_map[idx]]
+            subsystem_solutions.append(solutions)
+
+        # # solve the system, have to reload the global approximate solution at each step and store
+        # # the solution for each subsystem at each step
+        for i in range(self.num_iterations):
+            for idx, subsystem in enumerate(self.subsystems):
+                solve_subsystem(self.m.find_component(subsystem), self.folder, self.solver, idx)
+                print("Solve subsystem {}".format(idx))
+                for var in subsystem_solutions[idx]:
+                    print(var.name, " : ", var.value)
+                    # save solution
+                    subsystem_solutions[idx][var] = var.value
+                    # reset solution
+                    var.value = global_approximation[var]
+            
+            # update the global approximation from each subsystem
+            for i in range(len(self.var_list)):
+                print("Updates from subsystem {}".format(i))
+                for var_idx in self.var_list[i]:
+                    print(self.idx_var_map[var_idx].name, " new value = ", subsystem_solutions[i][self.idx_var_map[var_idx]])
+                    self.idx_var_map[var_idx].value = subsystem_solutions[i][self.idx_var_map[var_idx]]
+            
+            # update the linking constraint variables
+            for var in self.complicating_variables:
+                var.value = sum([subsystem_solutions[i][var] for i in range(len(subsystem_solutions))])/len(subsystem_solutions)
+            
+            # update the global approximation
+            for var in global_approximation:
+                global_approximation[var] = var.value
+            
+            # udpate the variables
+            
+            print("updated global approximation")
+            for var in global_approximation:
+                print(var.name, " : ", var.value)
+            
+            print("sum of violation : ", sum(get_constraint_violation(constr) for constr in self.constr_list_all))
+        assert False
+    
+    def test_strategy_2(self):
+        # fix linking variables, all others free
+        # solve subsystems
+        # average the variable values
+        # fix the nonlinking variables, minimize the residual of the linking variables
+        global_approximation = ComponentMap()
+        for idx in self.idx_var_map:
+            if self.alternate and idx%2 == 0:
+                global_approximation[self.idx_var_map[idx]] = -self.starting_value  # initialize to 2 
+            else:
+                global_approximation[self.idx_var_map[idx]] = self.starting_value  # initialize to 2 
+            self.idx_var_map[idx].value = global_approximation[self.idx_var_map[idx]]
+        # for idx in self.idx_var_map:
+        #     global_approximation[self.idx_var_map[idx]] = self.idx_var_map[idx].value
+        for var in global_approximation:
+            print(var.name, var.value)
+        
+        subsystem_solutions = []
+        for subsystem in self.subsystems:
+            solutions = ComponentMap()
+            for idx in self.idx_var_map:
+                solutions[self.idx_var_map[idx]] = global_approximation[self.idx_var_map[idx]]
+            subsystem_solutions.append(solutions)
+        
+        # determine variables that appear uniquely in subsystems
+        # this is the set of variables that do not appear in the linking constraint subsystem
+        # these we do not want to average, but update directly
+        unique_var_list = [var for var in self.nonlinking_vars if var.name 
+            not in [i.name for i in self.m.find_component("linking_constraint_subsystem").component_data_objects(pyo.Var)]]
+
+        unique_var_subsystem_map = ComponentMap()
+        for var in unique_var_list:
+            for i in range(len(self.subsystems)):
+                if var.name in [j.name for j in self.m.find_component(self.subsystems[i]).component_data_objects(pyo.Var)]:
+                    unique_var_subsystem_map[var] = i
+
+        for var in unique_var_subsystem_map:
+            print(var.name, " : ", unique_var_subsystem_map[var])
+
+
+        # solve the system, have to reload the global approximate solution at each step and store
+        # the solution for each subsystem at each step
+        for i in range(self.num_iterations):
+            # fix the linking variables
+            unfix_variables(self.nonlinking_vars)
+            fix_variables(self.complicating_variables)
+
+            # solve the subsystems
+            for idx, subsystem in enumerate(self.subsystems):
+                solve_subsystem(self.m.find_component(subsystem), self.folder, self.solver, idx)
+                print("Solve subsystem {}".format(idx))
+                for var in subsystem_solutions[idx]:
+                    print(var.name, " : ", var.value)
+                    subsystem_solutions[idx][var] = var.value
+                    var.value = global_approximation[var]
+            
+            # update the subsystem variables - averaging them
+            for var in self.nonlinking_vars:
+                if var in unique_var_subsystem_map:
+                    # variables unique to subsystems are not averaged because they do not show up in any of the others
+                    global_approximation[var] = subsystem_solutions[unique_var_subsystem_map[var]][var]
+                else:
+                    global_approximation[var] = sum([subsystem_solutions[i][var] for i in range(len(subsystem_solutions))])/len(subsystem_solutions)
+
+            # update the values
+            for var in self.nonlinking_vars:
+                var.value = global_approximation[var]
+            
+            # unfix the linking vars, minimize residuals of linking constraint system
+            unfix_variables(self.complicating_variables)
+            fix_variables(self.nonlinking_vars)
+
+            for var in self.m.find_component("linking_constraint_subsystem").component_data_objects(pyo.Var):
+                print(var.name, " : fixed = ", var.fixed)
+                if var.fixed:
+                    print(var.value)
+
+
+            # solve the linking constraint subsystem
+            solve_subsystem(self.m.find_component("linking_constraint_subsystem"), self.folder, self.solver, "linking_constraint")
+            print("Solve linking constraint subsystem")
+            print("Objective value = ", pyo.value(self.m.find_component("linking_constraint_subsystem").obj))
+            for var in self.m.find_component("linking_constraint_subsystem").component_data_objects(pyo.Var):
+                print(var.name, " : ", var.value)
+                global_approximation[var] = var.value
+            
+            print("updated global approximation")
+            for var in global_approximation:
+                print(var.name, " : ", var.value)
+            
+            print("sum of violation : ", sum(get_constraint_violation(constr) for constr in self.constr_list_all))
+        assert False 
 
 
         
