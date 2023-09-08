@@ -26,6 +26,7 @@ import os
 import sys 
 import math
 import random 
+import copy
 random.seed(8900)
 
 class algorithmConfiguration(object):
@@ -171,6 +172,12 @@ def get_incidence_matrix(m):
   incidence_matrix = igraph.incidence_matrix
   return igraph, incidence_matrix
 
+def get_incidence_matrix_fixed(m, include_fixed=True):
+  igraph = IncidenceGraphInterface(m, include_inequality=False, include_fixed=include_fixed)
+  incidence_matrix = igraph.incidence_matrix
+  return igraph, incidence_matrix
+
+
 def create_edge_list_from_matrix(matrix):
   return [(i,j) for i,j in zip(*matrix.nonzero())]
 
@@ -311,6 +318,15 @@ def create_subsystem_from_constr_list_no_obj(model, constr_idx_list, constr_map,
   model.find_component(name).obj = pyo.Objective(expr = 0)
   return
 
+def update_objective_function(m, name):
+  subsystem = m.find_component(name)
+  subsystem.del_component(subsystem.obj)
+
+  subsystem.obj = pyo.Objective(expr=sum(1/get_squared_constraint_violation(constr) * convert_constr_to_residual_form(constr)**2 
+      if get_squared_constraint_violation(constr) > 1e-3 else convert_constr_to_residual_form(constr)**2
+      for constr in subsystem.component_data_objects(pyo.Constraint)))
+  return 
+
 def create_subsystems(model, constr_lists, constr_map, no_objective=True):
   names = []
   for idx, constr_list in enumerate(constr_lists):
@@ -351,7 +367,7 @@ def solve_subsystem_conopt(subsystem, folder, id):
   try:
     # 1000 iterations for conopt
     results = solver.solve(subsystem, io_options=opts, 
-      #tmpdir= "/.nfs/home/strahlw/GAMS/pyomoTmp/conopt", keepfiles=True,
+      # tmpdir= "/.nfs/home/strahlw/GAMS/pyomoTmp/conopt", keepfiles=True,
       logfile=os.path.join(folder,"block_{}_logfile_conopt.log".format(id)))
     if results.solver.status == SolverStatus.error:
       return False
@@ -466,6 +482,11 @@ def convert_constr_to_residual_form(constraint):
 def create_residual_objective_expression(list_constraints):
   return sum(convert_constr_to_residual_form(constr)**2 for constr in list_constraints)
   
+# def rescale_obj_function(list_constraints, subsystem, model):
+#   # delete old objective
+#   model.find_component(subsystem).del_component()
+
+
 def phase_I(model, complicating_variables, simple_variables, subsystem_names, folder, iteration, solver):
   # assume all the variables are unfixed
   unfix_variables(simple_variables)
@@ -560,6 +581,17 @@ def assign_initial_point_distance(parameter, initial_vals):
     for var in initial_vals:
       var.value = (1-parameter)*var.value + parameter*initial_vals[var]
     return
+
+def initialize_variables_init_heur(model, use_fbbt=False):
+  igraph, incidence_matrix = get_incidence_matrix(model)
+  initial_bounds = get_original_bounds(model, igraph)
+  if use_fbbt:
+    execute_fbbt(model)
+  initial_vals = get_initial_values_guesses(model, igraph)
+  for var in igraph.variables:
+    var.value = initial_vals[var]
+  reset_bounds(igraph.variables, initial_bounds)
+  return
 
 
 def strip_bounds_tf(model):
@@ -875,7 +907,10 @@ def initialization_strategy_LC_overlap(model, folder, method=2, num_part=4, frac
   matched=False, d_max=1, n_max=2, solver="ipopt", use_init_heur="True", use_fbbt="True",
   max_iteration=100, border_fraction=0.5, algo_configuration=algorithmConfiguration(), test=0,
   strip_model_bounds=False, distance=None):
-  final_folder = "FinalResultsRunsDistance"
+  # model.pprint()
+  # sys.exit(0)
+
+  final_folder = "ResultsOverlapStrategy"
   if not os.path.exists(final_folder):
     os.mkdir(final_folder)
   first_folder = folder
@@ -898,6 +933,11 @@ def initialization_strategy_LC_overlap(model, folder, method=2, num_part=4, frac
   
   old_vals = initialize_old_vals(list_variables)
 
+  # note that this does not actually do anything because of the reset bounds function
+  for var in list_variables:
+    if var.lb > 0 and var.lb < 1e-8:
+      var.setlb(1e-8)
+
   if distance != None:
     assign_initial_point_distance(distance, initial_vals)
     old_vals = initialize_old_vals(list_variables)
@@ -910,17 +950,25 @@ def initialization_strategy_LC_overlap(model, folder, method=2, num_part=4, frac
   col_order, row_order, blocks, idx_var_map, idx_constr_map = \
   get_restructured_matrix_general(incidence_matrix, igraph, model, folder, method, fraction, num_part, matched, 
     d_max, n_max, border_fraction)
+  complicating_constraints = get_list_complicating_constraint_indices(blocks, idx_constr_map)
+  complicating_variables = get_list_of_complicating_variables(blocks, idx_var_map)
   constr_list = [i[1] for i in blocks]
-  var_list = [i[0] for i in blocks]
-  complicating_constr = get_list_of_complicating_constraints(blocks, idx_constr_map)
-  complicating_constr_idxs = get_list_complicating_constraint_indices(blocks, idx_constr_map)
-  complicating_vars = get_list_of_complicating_variables(blocks, idx_var_map)
-  simple_vars = get_list_of_simple_variables(blocks, idx_var_map)
-  complicating_constr_subsystem_name = "complicating constraints"
-
-  subsystem_constr_list = [i + complicating_constr_idxs for i in constr_list]
+  var_list = [copy.deepcopy(i[0]) for i in blocks]
+  nonlinking_vars = [idx_var_map[var] for array in var_list for var in array]
+  subsystem_constr_list = [i + constr_list[idx+1] + complicating_constraints 
+      if idx <= len(constr_list) - 2 else i + complicating_constraints for idx, i in enumerate(constr_list)]
+  subsystem_constr_list[-1] += constr_list[0]
   subsystems = create_subsystems(model, subsystem_constr_list, idx_constr_map, no_objective=True)
   constr_list_all = [idx_constr_map[constr] for constr in idx_constr_map]
+  linking_constraint_subsytem = create_subsystem_from_constr_list(model, complicating_constraints, 
+                                          idx_constr_map, "linking_constraint_subsystem")
+  subsystem_var_list = [i[0] + blocks[idx+1][0] if idx <= len(blocks) - 2 else 
+                              i[0] for idx, i in enumerate(blocks)]
+  subsystem_var_list[-1] += blocks[0][0]
+        
+  # deactivate all constraints -> no longer strictly enforcing the constraints
+  for constr in model.component_data_objects(pyo.Constraint):
+      constr.deactivate()
 
   # create "global approximation" - shared solution
   # initialize to the value the variables are initialized to
@@ -945,35 +993,47 @@ def initialization_strategy_LC_overlap(model, folder, method=2, num_part=4, frac
       break
 
     for idx, subsystem in enumerate(subsystems):
-        solve_subsystem(model.find_component(subsystem), folder, solver, f"{idx}")
+        update_objective_function(model, subsystem)
+        solve_subsystem(model.find_component(subsystem), folder, solver, idx)
         print("Solve subsystem {}".format(idx))
         for var in subsystem_solutions[idx]:
             # print(var.name, " : ", var.value)
+            # save solution
             subsystem_solutions[idx][var] = var.value
+            # reset solution
             var.value = global_approximation[var]
+            # print(var.name, " : ", var.value)
     
-    # update the global approximation from each subsystem
+    # after all subsystems are solved        
     for i in range(len(var_list)):
         # print("Updates from subsystem {}".format(i))
         for var_idx in var_list[i]:
             # print(idx_var_map[var_idx].name, " new value = ", subsystem_solutions[i][idx_var_map[var_idx]])
-            idx_var_map[var_idx].value = set_within_bounds(subsystem_solutions[i][idx_var_map[var_idx]], 
-              idx_var_map[var_idx].lb, idx_var_map[var_idx].ub)
+            idx_var_map[var_idx].value = subsystem_solutions[i][idx_var_map[var_idx]]
+            global_approximation[idx_var_map[var_idx]] = subsystem_solutions[i][idx_var_map[var_idx]]
     
-    # update the linking constraint variables
-    for var in complicating_vars:
-        var.value = set_within_bounds(sum([subsystem_solutions[i][var] for i in range(len(subsystem_solutions))])/len(subsystem_solutions), var.lb, var.ub)
-    
-    # update the global approximation
-    for var in global_approximation:
+    # PHASE II solve the complicating constraint system with the others fixed
+    update_objective_function(model, "linking_constraint_subsystem")
+    # model.find_component("linking_constraint_subsystem").pprint()
+    solve_subsystem(model.find_component("linking_constraint_subsystem"), folder, solver, "linking_constraint")
+    print("Linking constraint subsystem solve")
+    for var in model.find_component("linking_constraint_subsystem").component_data_objects(pyo.Var):
+        # print(var.name, " : ", var.value)
         global_approximation[var] = var.value
-    
+
     # print("updated global approximation")
     # for var in global_approximation:
     #     print(var.name, " : ", var.value)
     
     print("sum of violation : ", sum(get_constraint_violation(constr) for constr in constr_list_all))
     iteration += 1
+  
+  # for final solve, use the current values of global approximation
+  for var in list_variables:
+    var.value = global_approximation[var] 
+  # reset the problem for a whole problem feasibility solve  
+
+
 
 def get_closer_initial_point(list_constraints, list_variables, alpha, beta, iter_lim):
   iteration = 0
@@ -1061,6 +1121,10 @@ def norm_l2(vector):
 
 def get_constraint_violation(constraint):
   return abs(pyo.value(constraint.body) - constraint.upper)
+
+
+def get_squared_constraint_violation(constraint):
+  return (pyo.value(constraint.body) - constraint.upper) ** 2
 
 def adjust_consensus_value(val, lb, ub):
   if ub == None and lb == None:
